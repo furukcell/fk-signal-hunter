@@ -78,6 +78,32 @@ function runBacktest(rows = [], options = {}) {
     maxDrawdownPct = Math.max(maxDrawdownPct, ((peak - equity) / peak) * 100);
   }
 
+  // Mark any positions still open at the end of the dataset to the last observed price.
+  for (const open of positions.values()) {
+    const finalPrice = Number(open.lastPrice);
+    if (!Number.isFinite(finalPrice) || finalPrice <= 0) continue;
+
+    const exitFee = finalPrice * open.quantity * open.feeRate;
+    const entryFee = open.entryPrice * open.quantity * open.feeRate;
+    const gross = (finalPrice - open.entryPrice) * open.quantity;
+    const net = gross - entryFee - exitFee - open.slippage;
+    balance += open.allocation + net;
+    trades.push({
+      symbol: open.symbol,
+      exchange: open.exchange,
+      entryPrice: open.entryPrice,
+      exitPrice: finalPrice,
+      netPnl: net,
+      fees: entryFee + exitFee,
+      slippage: open.slippage,
+      reason: "END_OF_DATA",
+      score: open.score,
+      openedAt: open.openedAt,
+      closedAt: sorted.length ? sorted[sorted.length - 1].ts : Date.now()
+    });
+  }
+  positions.clear();
+
   const wins = trades.filter(t => t.netPnl > 0);
   const losses = trades.filter(t => t.netPnl < 0);
   const grossProfit = wins.reduce((s, t) => s + t.netPnl, 0);
