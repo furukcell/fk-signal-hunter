@@ -79,7 +79,26 @@ function ModuleView({tab}){
   const trades=data?.trades??[];
   const wins=trades.filter(t=>t.netPnl>0).length;
   const pf=(()=>{const gp=trades.filter(t=>t.netPnl>0).reduce((s,t)=>s+t.netPnl,0);const gl=Math.abs(trades.filter(t=>t.netPnl<0).reduce((s,t)=>s+t.netPnl,0));return gl?gp/gl:null})();
-  return <><div className="stats"><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper"/><Stat icon={TrendingUp} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Since start"/><Stat icon={Target} label="Win Rate" value={trades.length?((wins/trades.length)*100).toFixed(1)+'%':'—'} detail={trades.length+' closed trades'}/><Stat icon={Gauge} label="Profit Factor" value={pf==null?'—':pf.toFixed(2)} detail="Net after modeled costs"/></div><div className="card empty"><BarChart3 size={24}/><h2>Performance data layer connected</h2><p>Equity, return, win rate and profit factor are now fed from the paper engine. Historical equity curve and walk-forward reports come next.</p></div></>;
+  const [wf,setWf]=useState(null);
+  const [wfLoading,setWfLoading]=useState(false);
+  const runValidation=async()=>{
+   setWfLoading(true);
+   try{
+    const r=await fetch('/api/walk-forward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:{baseOptions:{entryDelayMs:10000,maxHoldMs:15*60*1000,cooldownMs:60*1000,slippageBps:5}}})});
+    const d=await r.json();
+    if(r.ok)setWf(d); else setWf({error:d.error||'Validation failed'});
+   }catch(e){setWf({error:e.message});}
+   finally{setWfLoading(false);}
+  };
+  const a=wf?.result?.aggregate;
+  return <><div className="stats"><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper"/><Stat icon={TrendingUp} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Since start"/><Stat icon={Target} label="Win Rate" value={trades.length?((wins/trades.length)*100).toFixed(1)+'%':'—'} detail={trades.length+' closed trades'}/><Stat icon={Gauge} label="Profit Factor" value={pf==null?'—':pf.toFixed(2)} detail="Net after modeled costs"/></div>
+  <section className="card">
+   <div className="head"><div><small>HISTORICAL VALIDATION</small><h2>Walk-Forward Test</h2></div><button className="linkBtn" onClick={runValidation} disabled={wfLoading}>{wfLoading?'Running…':'Run validation'}</button></div>
+   <p className="muted">7-day training → 1-day unseen test. Parameters are selected only from the training window; test results are out-of-sample.</p>
+   {wf?.error&&<div className="notice"><RefreshCw size={17}/><div><b>Validation:</b> {wf.error}</div></div>}
+   {a&&<div className="stats"><Stat icon={BarChart3} label="Test Windows" value={a.windows} detail={a.skippedWindows+' skipped'}/><Stat icon={TrendingUp} label="Positive Windows" value={(a.positiveWindowRate*100).toFixed(1)+'%'} detail={a.positiveWindows+' windows'}/><Stat icon={Target} label="Avg OOS Return" value={a.averageOutOfSampleReturnPct.toFixed(2)+'%'} detail="Per test window"/><Stat icon={Wallet} label="OOS P&L" value={a.totalOutOfSamplePnl.toFixed(2)+' TL'} detail="Aggregate"/></div>}
+   {wf?.result?.windows?.length>0&&<Table title="OUT-OF-SAMPLE WINDOWS" subtitle="Walk-forward" action={wf.result.candidates+' parameter sets'}><thead><tr><th>TEST</th><th>SELECTED</th><th>TRAIN RETURN</th><th>OOS RETURN</th><th>OOS TRADES</th><th>OOS PF</th><th>DRAWDOWN</th></tr></thead><tbody>{wf.result.windows.filter(w=>w.outOfSample).map((w,i)=><tr key={i}><td>{new Date(w.testStart).toLocaleDateString()}</td><td>{w.selected?'S'+w.selected.entryScore+' / TP '+(w.selected.tpPct*100).toFixed(1)+' / SL '+(w.selected.slPct*100).toFixed(1):'—'}</td><td>{w.inSample.returnPct.toFixed(2)}%</td><td>{w.outOfSample.returnPct.toFixed(2)}%</td><td>{w.outOfSample.trades}</td><td>{w.outOfSample.profitFactor==null?'—':w.outOfSample.profitFactor.toFixed(2)}</td><td>{w.outOfSample.maxDrawdownPct.toFixed(2)}%</td></tr>)}</tbody></Table>}
+  </section></>;
  }
  if(tab==='Risk'){
   return <><div className="stats"><Stat icon={ShieldCheck} label="Open Positions" value={(data?.openPositions?.length??0)+' / 2'} detail="Maximum positions"/><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper only"/><Stat icon={Gauge} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Current"/></div><div className="card empty"><ShieldCheck size={24}/><h2>Risk engine active</h2><p>Position sizing, maximum open positions and daily-loss protection are enforced by the paper engine.</p></div></>;
