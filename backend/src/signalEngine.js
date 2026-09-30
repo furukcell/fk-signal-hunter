@@ -7,6 +7,7 @@ function buildOpportunity(market, options = {}) {
     ? Number(options.minNetEdgePct)
     : DEFAULT_MIN_NET_EDGE_PCT;
 
+  const now = Date.now();
   const exchanges = Object.entries(market.exchangeData || {})
     .map(([exchange, d]) => ({ exchange, ...d }))
     .filter(x =>
@@ -14,7 +15,8 @@ function buildOpportunity(market, options = {}) {
       Number.isFinite(Number(x.bid)) &&
       Number.isFinite(Number(x.ask)) &&
       Number(x.bid) > 0 &&
-      Number(x.ask) > 0
+      Number(x.ask) > 0 &&
+      (!x.updatedAt || now - Number(x.updatedAt) <= 30_000)
     );
 
   if (!exchanges.length) return null;
