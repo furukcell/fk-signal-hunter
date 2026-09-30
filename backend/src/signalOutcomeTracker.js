@@ -11,6 +11,7 @@ class SignalOutcomeTracker {
     this.lastSignalAt = new Map();
     this.daily = new Map();
     this.currentDate = utcDate();
+    this.lastDailyFlushAt = 0;
   }
 
   observe(market, opportunity, timestamp = Date.now()) {
@@ -160,6 +161,10 @@ class SignalOutcomeTracker {
     }
     for (const date of this.daily.keys()) {
       if (date < this.currentDate) await this.flushDaily(date);
+    }
+    if (timestamp - this.lastDailyFlushAt >= 60 * 60_000) {
+      await this.flushDaily(this.currentDate);
+      this.lastDailyFlushAt = timestamp;
     }
   }
 }
