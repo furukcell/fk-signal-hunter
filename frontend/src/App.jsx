@@ -35,7 +35,7 @@ export default function App(){
  },[]);
 
  const score=useMemo(()=>signalScore(market),[market]);
- const connected=Boolean(market?.connected);
+ const connected=exchangeCount(market)>0;
 
  return <div className="app">
   <aside className={open?'side open':'side'}>
