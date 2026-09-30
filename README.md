@@ -666,3 +666,42 @@ Gerçek para ile işlem yapılmadan önce kapsamlı backtest ve paper trading ya
 Personal Market Intelligence & Automated Trading System.
 
 **Status:** 🧪 Paper Trading / Validation
+---
+
+## 🚀 Local Development
+
+### Backend
+
+```bash
+cd backend
+npm install
+npm start
+```
+
+Backend API: `http://localhost:3001`
+
+### Dashboard
+
+Yeni bir terminalde:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Dashboard: `http://localhost:5173`
+
+The Vite development proxy automatically targets `localhost:3001` for a normal local setup.
+
+### Docker
+
+Both services can also be started together:
+
+```bash
+docker compose up
+```
+
+The Docker dashboard proxy uses the internal `backend:3001` service address automatically.
+
+
