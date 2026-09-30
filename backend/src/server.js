@@ -474,7 +474,7 @@ function handleExchangeEvent(event) {
   updateSignal(m);
 
   const opportunity = buildOpportunity(m);
-  paper.recordSignal(Boolean(opportunity?.actionable));
+  paper.recordSignal(Boolean(opportunity?.actionable), m.symbol, event.ts);
   if (opportunity && m.activeExchangeCount < 3) {
     opportunity.actionable = false;
     opportunity.inactiveExchangeCount = m.staleExchangeCount;
