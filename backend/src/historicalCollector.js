@@ -18,16 +18,23 @@ class HistoricalCollector {
   }
 
   serializeMarket(m) {
+    const executionExchange = m.opportunity?.bestBuy?.exchange || "binance";
+    const executionVenue = m.exchangeData?.[executionExchange] || {};
+    const price = Number(executionVenue.price ?? executionVenue.bid ?? m.last);
+    const bid = Number(executionVenue.bid ?? m.bid);
+    const ask = Number(executionVenue.ask ?? m.ask);
+    const spreadPct = bid > 0 && ask > 0 ? ((ask - bid) / bid) * 100 : m.spreadPct;
+
     return {
       ts: Date.now(),
       symbol: m.symbol,
-      exchange: m.opportunity?.bestBuy?.exchange || "binance",
+      exchange: executionExchange,
       baseAsset: m.baseAsset,
       quoteAsset: m.quoteAsset,
-      price: m.last,
-      bid: m.bid,
-      ask: m.ask,
-      spreadPct: m.spreadPct,
+      price,
+      bid,
+      ask,
+      spreadPct,
       score: m.score,
       signal: m.signal,
       buyPressurePct: m.buyPressurePct,
