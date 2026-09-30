@@ -397,8 +397,9 @@ class CrossExchangeHub {
   async connect_coinbase() {
     const products = [];
     for (const base of this.bases) {
+      // Keep one canonical quote per exchange/base in the normalized hub.
+      // USD and USDT streams would otherwise overwrite each other in exchangeData.
       products.push(base + "-USDT");
-      products.push(base + "-USD");
     }
     const ws = new WebSocket("wss://advanced-trade-ws.coinbase.com");
     ws.on("open", () => {
