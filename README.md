@@ -616,6 +616,7 @@ gösterirse geçecektir.
 - [x] Walk-forward results
 - [x] Live signal diagnostics
 - [x] Frontend build validation in CI
+- [x] Core signal / paper engine tests in CI
 - [ ] Equity curve visualization
 - [ ] Extended signal / coin analytics
 
