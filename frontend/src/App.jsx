@@ -91,7 +91,19 @@ function ModuleView({tab}){
   const wins=trades.filter(t=>t.netPnl>0).length;
   const pf=(()=>{const gp=trades.filter(t=>t.netPnl>0).reduce((s,t)=>s+t.netPnl,0);const gl=Math.abs(trades.filter(t=>t.netPnl<0).reduce((s,t)=>s+t.netPnl,0));return gl?gp/gl:null})();
   const a=wf?.result?.aggregate;
-  return <><div className="stats"><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper"/><Stat icon={TrendingUp} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Since start"/><Stat icon={Target} label="Win Rate" value={trades.length?((wins/trades.length)*100).toFixed(1)+'%':'—'} detail={trades.length+' closed trades'}/><Stat icon={Gauge} label="Profit Factor" value={pf==null?'—':pf.toFixed(2)} detail="Net after modeled costs"/></div>
+  const signalStats=data?.signalStats||{};
+  const maxDd=Number(data?.maxDrawdownPct||0);
+  const conversion=signalStats.actionable?((signalStats.entries/signalStats.actionable)*100):0;
+  return <><div className="stats"><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper"/><Stat icon={TrendingUp} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Since start"/><Stat icon={Target} label="Win Rate" value={trades.length?((wins/trades.length)*100).toFixed(1)+'%':'—'} detail={trades.length+' closed trades'}/><Stat icon={Gauge} label="Profit Factor" value={pf==null?'—':pf.toFixed(2)} detail="Net after modeled costs"/><Stat icon={ShieldCheck} label="Max Drawdown" value={maxDd.toFixed(2)+'%'} detail="Peak-to-equity"/></div>
+  <section className="card">
+   <div className="head"><div><small>PAPER EXECUTION QUALITY</small><h2>Live Performance</h2></div><span className="tag">PAPER</span></div>
+   <div className="stats">
+    <Stat icon={Activity} label="Actionable Signals" value={signalStats.actionable??0} detail="Observed since restart"/>
+    <Stat icon={Target} label="Signal → Entry" value={conversion.toFixed(1)+'%'} detail={(signalStats.entries??0)+' entries'}/>
+    <Stat icon={ShieldCheck} label="Rejected" value={signalStats.rejected??0} detail="Risk / cooldown / duplicate"/>
+    <Stat icon={TrendingUp} label="Equity Samples" value={data?.equityHistory?.length??0} detail="Recent history"/>
+   </div>
+  </section>
   <section className="card">
    <div className="head"><div><small>HISTORICAL VALIDATION</small><h2>Walk-Forward Test</h2></div><button className="linkBtn" onClick={runValidation} disabled={wfLoading}>{wfLoading?'Running…':'Run validation'}</button></div>
    <p className="muted">7-day training → 1-day unseen test. Parameters are selected only from the training window; test results are out-of-sample.</p>
