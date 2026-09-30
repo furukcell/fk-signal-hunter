@@ -24,7 +24,15 @@ const exchangeFlows = new Map();
 let universe = [];
 let hub = null;
 let universeTimer = null;
-const paper = new PaperEngine({ initialBalance: 1000, positionPct: 0.15, tpPct: 0.02, slPct: 0.008, maxOpenPositions: 2 });
+const paper = new PaperEngine({
+  initialBalance: 1000,
+  positionPct: 0.15,
+  tpPct: 0.02,
+  slPct: 0.008,
+  maxOpenPositions: 2,
+  dailyLossPct: 0.015,
+  cooldownMs: 60_000
+});
 const historical = new HistoricalCollector({ intervalMs: Number(process.env.HISTORICAL_INTERVAL_MS || 10000) });
 
 function emptyMarket(symbol) {
