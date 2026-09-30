@@ -37,7 +37,8 @@ function emptyMarket(symbol) {
     exchangeCount: 0, buyConsensus: 0, priceDispersionPct: null,
     exchangeData: {}, flow: [], priceHistory: [], bookSnapshots: [],
     persistencePct: null, bidPersistencePct: null, askPersistencePct: null,
-    bookPullRatio: 0, bookReplenishmentRatio: 0, updatedAt: null
+    bookPullRatio: 0, bookReplenishmentRatio: 0,
+    sellAbsorption: 0, buyAbsorption: 0, absorptionSignal: "NONE", updatedAt: null
   };
 }
 
@@ -198,6 +199,63 @@ function calculateBookPersistence(m) {
     : 0;
 }
 
+function calculateAbsorption(m) {
+  const now = Date.now();
+  const windowStart = now - FLOW_WINDOW_MS;
+  const recent = m.flow.filter(x => x.time >= windowStart && Number(x.quoteQty) > 0);
+
+  const buyVolume = recent
+    .filter(x => x.side === "buy")
+    .reduce((sum, x) => sum + Number(x.quoteQty), 0);
+  const sellVolume = recent
+    .filter(x => x.side === "sell")
+    .reduce((sum, x) => sum + Number(x.quoteQty), 0);
+  const totalVolume = buyVolume + sellVolume;
+
+  const history = m.priceHistory.filter(x => x.time >= windowStart && Number(x.price) > 0);
+  if (totalVolume <= 0 || history.length < 2) {
+    m.buyAbsorption = 0;
+    m.sellAbsorption = 0;
+    m.absorptionSignal = "NONE";
+    return;
+  }
+
+  const firstPrice = history[0].price;
+  const lastPrice = history[history.length - 1].price;
+  const priceMovePct = firstPrice > 0 ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
+
+  const pressure = totalVolume > 0
+    ? (buyVolume - sellVolume) / totalVolume
+    : 0;
+
+  // Strong selling with little downward movement = bid-side absorption.
+  const sellPressure = Math.max(0, -pressure);
+  const buyPressure = Math.max(0, pressure);
+  const downMove = Math.max(0, -priceMovePct);
+  const upMove = Math.max(0, priceMovePct);
+
+  const sellAbsorptionBase = sellPressure >= 0.15 && downMove <= 0.12;
+  const buyAbsorptionBase = buyPressure >= 0.15 && upMove <= 0.12;
+
+  const bidSupport = Number(m.bidPersistencePct || 0) / 100;
+  const askSupport = Number(m.askPersistencePct || 0) / 100;
+
+  m.sellAbsorption = sellAbsorptionBase
+    ? Math.min(1, sellPressure * 1.5 + bidSupport * 0.5)
+    : 0;
+  m.buyAbsorption = buyAbsorptionBase
+    ? Math.min(1, buyPressure * 1.5 + askSupport * 0.5)
+    : 0;
+
+  if (m.sellAbsorption >= 0.35 && m.sellAbsorption > m.buyAbsorption) {
+    m.absorptionSignal = "SELL_ABSORBED";
+  } else if (m.buyAbsorption >= 0.35 && m.buyAbsorption > m.sellAbsorption) {
+    m.absorptionSignal = "BUY_ABSORBED";
+  } else {
+    m.absorptionSignal = "NONE";
+  }
+}
+
 function updateSignal(m) {
   prune(m);
   const recentFlow = m.flow.filter(x => Number(x.quoteQty) > 0);
@@ -216,6 +274,7 @@ function updateSignal(m) {
 
   calculateBookFeatures(m);
   calculateBookPersistence(m);
+  calculateAbsorption(m);
 
   let score = 50;
   const reasons = [];
@@ -260,6 +319,14 @@ function updateSignal(m) {
       score += 3;
       reasons.push("Bid replenishment");
     }
+  }
+
+  if (m.absorptionSignal === "SELL_ABSORBED") {
+    score += 10;
+    reasons.push("Sell pressure absorbed by bids");
+  } else if (m.absorptionSignal === "BUY_ABSORBED") {
+    score -= 6;
+    reasons.push("Buy pressure absorbed by asks");
   }
 
   if (m.spreadPct != null) {
