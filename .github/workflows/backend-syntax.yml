@@ -28,3 +28,8 @@ jobs:
       - run: node --check src/historicalCollector.js
       - run: node --check src/historicalLoader.js
       - run: node --check src/walkForwardEngine.js
+      - name: Frontend build
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
