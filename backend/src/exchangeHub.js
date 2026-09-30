@@ -102,6 +102,10 @@ function normalize({ exchange, symbol, baseAsset, quoteAsset, price, bid, ask, s
   const b = Number(bid);
   const a = Number(ask);
   const q = Number(qty);
+  let normalizedTs = Number(ts) || Date.now();
+  if (normalizedTs > 1e17) normalizedTs /= 1e6; // nanoseconds -> milliseconds
+  else if (normalizedTs > 1e14) normalizedTs /= 1e3; // microseconds -> milliseconds
+
   return {
     exchange, symbol, baseAsset, quoteAsset,
     price: Number.isFinite(p) ? p : null,
@@ -111,7 +115,7 @@ function normalize({ exchange, symbol, baseAsset, quoteAsset, price, bid, ask, s
     side: side === "buy" || side === "sell" ? side : null,
     qty: Number.isFinite(q) ? q : null,
     quoteQty: Number.isFinite(q) && Number.isFinite(p) ? q * p : null,
-    ts: Number(ts) || Date.now(),
+    ts: normalizedTs,
     source
   };
 }
@@ -399,7 +403,7 @@ class CrossExchangeHub {
     const ws = new WebSocket("wss://advanced-trade-ws.coinbase.com");
     ws.on("open", () => {
       ws.send(JSON.stringify({ type: "subscribe", product_ids: products, channel: "ticker",  }));
-      ws.send(JSON.stringify({ type: "subscribe", product_ids: products, channel: "market_trades", api_key: "" }));
+      ws.send(JSON.stringify({ type: "subscribe", product_ids: products, channel: "market_trades" }));
     });
     this.attach("coinbase", ws, data => {
       const msg = JSON.parse(data.toString());
