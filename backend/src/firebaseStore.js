@@ -5,8 +5,28 @@ function getFirebaseCredentials() {
   const projectId = process.env.FIREBASE_PROJECT_ID || "";
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || "";
   const privateKey = (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
-  if (!projectId || !clientEmail || !privateKey) return null;
-  return { projectId, clientEmail, privateKey };
+
+  if (projectId && clientEmail && privateKey) {
+    return { projectId, clientEmail, privateKey };
+  }
+
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "";
+  if (serviceAccountJson) {
+    try {
+      const parsed = JSON.parse(serviceAccountJson);
+      if (parsed.project_id && parsed.client_email && parsed.private_key) {
+        return {
+          projectId: parsed.project_id,
+          clientEmail: parsed.client_email,
+          privateKey: parsed.private_key
+        };
+      }
+    } catch (error) {
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON");
+    }
+  }
+
+  return null;
 }
 
 class FirebaseStore {
