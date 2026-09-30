@@ -123,7 +123,11 @@ class SignalOutcomeTracker {
       slReached: 0,
       noThreshold: 0,
       sumMove15m: 0,
-      move15mSamples: 0
+      move15mSamples: 0,
+      paperTrades: 0,
+      paperWins: 0,
+      paperLosses: 0,
+      paperNetPnl: 0
     };
     stats.signals += 1;
     if (result === "TP_REACHED") stats.tpReached += 1;
@@ -136,6 +140,28 @@ class SignalOutcomeTracker {
     this.daily.set(date, stats);
   }
 
+  recordPaperTrade(trade, timestamp = Date.now()) {
+    const date = utcDate(timestamp);
+    const stats = this.daily.get(date) || {
+      signals: 0,
+      tpReached: 0,
+      slReached: 0,
+      noThreshold: 0,
+      sumMove15m: 0,
+      move15mSamples: 0,
+      paperTrades: 0,
+      paperWins: 0,
+      paperLosses: 0,
+      paperNetPnl: 0
+    };
+    stats.paperTrades += 1;
+    const pnl = Number(trade.netPnl ?? trade.pnl ?? 0);
+    stats.paperNetPnl += Number.isFinite(pnl) ? pnl : 0;
+    if (pnl > 0) stats.paperWins += 1;
+    else if (pnl < 0) stats.paperLosses += 1;
+    this.daily.set(date, stats);
+  }
+
   async flushDaily(date = this.currentDate) {
     const stats = this.daily.get(date);
     if (!stats) return;
@@ -145,6 +171,10 @@ class SignalOutcomeTracker {
       tpReached: stats.tpReached,
       slReached: stats.slReached,
       noThreshold: stats.noThreshold,
+      paperTrades: stats.paperTrades || 0,
+      paperWins: stats.paperWins || 0,
+      paperLosses: stats.paperLosses || 0,
+      paperNetPnl: stats.paperNetPnl || 0,
       outcomeWinRatePct: stats.signals
         ? (stats.tpReached / stats.signals) * 100
         : 0,
