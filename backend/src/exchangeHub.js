@@ -97,7 +97,7 @@ function cleanBase(symbol) {
   return String(symbol || "").toUpperCase().replace(/[-_/]/g, "").replace(/USDT|USDC|USD|KRW|BTC|EUR$/, "");
 }
 
-function normalize({ exchange, symbol, baseAsset, quoteAsset, price, bid, ask, side, qty, ts, source = "trade" }) {
+function normalize({ exchange, symbol, baseAsset, quoteAsset, price, bid, ask, side, qty, ts, bids = [], asks = [], source = "trade" }) {
   const p = Number(price);
   const b = Number(bid);
   const a = Number(ask);
@@ -219,7 +219,7 @@ class CrossExchangeHub {
     const symbols = this.bases.map(x => x.toLowerCase() + "usdt");
     const streams = [];
     for (const s of symbols) {
-      streams.push(s + "@trade", s + "@bookTicker");
+      streams.push(s + "@trade", s + "@bookTicker");\n      if (this.bases.indexOf(s.slice(0, -4).toUpperCase()) < 20) streams.push(s + "@depth20@100ms");
     }
     for (let i = 0; i < streams.length; i += 160) {
       const chunk = streams.slice(i, i + 160);
@@ -249,7 +249,7 @@ class CrossExchangeHub {
     const args = [];
     for (const base of this.bases) {
       args.push({ channel: "trades", instId: base + "-USDT" });
-      args.push({ channel: "tickers", instId: base + "-USDT" });
+      args.push({ channel: "books5", instId: base + "-USDT" });
     }
     for (let i = 0; i < args.length; i += 120) {
       const ws = new WebSocket("wss://ws.okx.com:8443/ws/v5/public");
@@ -267,10 +267,10 @@ class CrossExchangeHub {
             exchange: "okx", symbol: instId, baseAsset: base, quoteAsset: "USDT",
             price: d.px, qty: d.sz, side: d.side, ts: d.ts
           }));
-        } else if (msg.arg?.channel === "tickers") {
+        } else if (msg.arg?.channel === "books5") {
           this.emit(normalize({
             exchange: "okx", symbol: instId, baseAsset: base, quoteAsset: "USDT",
-            price: d.last, bid: d.bidPx, ask: d.askPx, ts: d.ts, source: "book"
+            price: d.asks?.[0]?.[0] || d.bids?.[0]?.[0], bid: d.bids?.[0]?.[0], ask: d.asks?.[0]?.[0],\n            bids: (d.bids || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),\n            asks: (d.asks || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),\n            ts: d.ts, source: "book"
           }));
         }
       }, 18000);
