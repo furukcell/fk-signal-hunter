@@ -198,7 +198,7 @@ class CrossExchangeHub {
     this.mark(exchange, "connecting");
     let heartbeat;
     ws.on("open", () => {
-      this.mark(exchange, "live");
+      this.mark(statusName, "live");
       if (heartbeatMs) heartbeat = setInterval(() => {
         try { if (ws.readyState === WebSocket.OPEN) ws.ping(); } catch {}
       }, heartbeatMs);
@@ -208,11 +208,11 @@ class CrossExchangeHub {
     });
     ws.on("close", () => {
       if (heartbeat) clearInterval(heartbeat);
-      this.mark(exchange, "offline");
-      this.connections.delete(exchange);
+      this.mark(statusName, "offline");
+      this.connections.delete(connectionKey);
       setTimeout(() => this.connectExchange(exchange), 3000);
     });
-    ws.on("error", () => this.mark(exchange, "error"));
+    ws.on("error", () => this.mark(statusName, "error"));
   }
 
   async connect_binance() {
@@ -378,7 +378,7 @@ class CrossExchangeHub {
     }
     const ws = new WebSocket("wss://advanced-trade-ws.coinbase.com");
     ws.on("open", () => {
-      ws.send(JSON.stringify({ type: "subscribe", product_ids: products, channel: "ticker", api_key: "" }));
+      ws.send(JSON.stringify({ type: "subscribe", product_ids: products, channel: "ticker",  }));
       ws.send(JSON.stringify({ type: "subscribe", product_ids: products, channel: "market_trades", api_key: "" }));
     });
     this.attach("coinbase", ws, data => {
