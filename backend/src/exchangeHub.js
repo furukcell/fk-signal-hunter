@@ -181,7 +181,32 @@ class CrossExchangeHub {
   }
 
   mark(exchange, state) {
-    this.status.set(exchange, state);
+    const current = this.status.get(exchange) || {};
+    this.status.set(exchange, { ...current, state });
+  }
+
+  ensureMetrics(exchange) {
+    const current = this.status.get(exchange);
+    if (current && typeof current === "object") return current;
+    const metrics = { state: current || "offline", messageCount: 0, reconnectCount: 0, errorCount: 0, lastDataAt: null };
+    this.status.set(exchange, metrics);
+    return metrics;
+  }
+
+  recordMessage(exchange) {
+    const metrics = this.ensureMetrics(exchange);
+    metrics.messageCount += 1;
+    metrics.lastDataAt = Date.now();
+  }
+
+  recordReconnect(exchange) {
+    const metrics = this.ensureMetrics(exchange);
+    metrics.reconnectCount += 1;
+  }
+
+  recordError(exchange) {
+    const metrics = this.ensureMetrics(exchange);
+    metrics.errorCount += 1;
   }
 
   getStatus() {
@@ -203,12 +228,16 @@ class CrossExchangeHub {
       }
 
       result[exchange] = {
-        status: this.status.get(exchange) || "offline",
+        status: (this.status.get(exchange)?.state || this.status.get(exchange) || "offline"),
         activeFeeds: active,
         staleFeeds: stale,
         expectedFeeds: this.bases.length,
         coveragePct: this.bases.length ? (active / this.bases.length) * 100 : 0,
-        lastUpdateAt
+        lastUpdateAt,
+        messageCount: Number(this.status.get(exchange)?.messageCount || 0),
+        reconnectCount: Number(this.status.get(exchange)?.reconnectCount || 0),
+        errorCount: Number(this.status.get(exchange)?.errorCount || 0),
+        lastDataAt: this.status.get(exchange)?.lastDataAt || null
       };
     }
 
@@ -222,6 +251,7 @@ class CrossExchangeHub {
       if (!fn) throw new Error("adapter missing");
       await fn.call(this);
     } catch (error) {
+      this.recordError(exchange);
       this.mark(exchange, "error");
       if (!this.stopping) setTimeout(() => this.connectExchange(exchange), 5000);
     }
@@ -238,10 +268,12 @@ class CrossExchangeHub {
       }, heartbeatMs);
     });
     ws.on("message", data => {
-      try { onMessage(data); } catch {}
+      this.recordMessage(statusName);
+      try { onMessage(data); } catch { this.recordError(statusName); }
     });
     ws.on("close", () => {
       if (heartbeat) clearInterval(heartbeat);
+      this.recordReconnect(statusName);
       this.mark(statusName, "offline");
       this.connections.delete(connectionKey);
       if (!this.stopping) {
@@ -252,7 +284,10 @@ class CrossExchangeHub {
         }, 3000);
       }
     });
-    ws.on("error", () => this.mark(statusName, "error"));
+    ws.on("error", () => {
+      this.recordError(statusName);
+      this.mark(statusName, "error");
+    });
   }
 
   async connect_binance() {
