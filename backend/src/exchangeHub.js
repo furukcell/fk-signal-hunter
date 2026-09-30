@@ -440,6 +440,7 @@ class CrossExchangeHub {
       { type: "orderbook", codes },
       { format: "DEFAULT" }
     ])));
+    // Upbit closes idle public sockets after 120s; periodic WebSocket PING keeps it alive.
     this.attach("upbit", ws, data => {
       const msg = JSON.parse(data.toString());
       const code = msg.code || "";
@@ -459,7 +460,7 @@ class CrossExchangeHub {
           bid: unit?.bid_price, ask: unit?.ask_price, ts: msg.timestamp, source: "book"
         }));
       }
-    }, 20000);
+    }, 20000, "upbit");
   }
 
   async connect_kucoin() {
@@ -535,7 +536,20 @@ class CrossExchangeHub {
       const openChunk = () => {
         if (this.stopping) return;
         const ws = new WebSocket("wss://wbs-api.mexc.com/ws");
-        ws.on("open", () => ws.send(JSON.stringify({ method: "SUBSCRIPTION", params: chunk })));
+        let pingTimer;
+        ws.on("open", () => {
+          ws.send(JSON.stringify({ method: "SUBSCRIPTION", params: chunk }));
+          pingTimer = setInterval(() => {
+            try {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ method: "PING" }));
+              }
+            } catch {}
+          }, 20000);
+        });
+        ws.on("close", () => {
+          if (pingTimer) clearInterval(pingTimer);
+        });
         this.attach("mexc-" + i, ws, data => {
           if (typeof data === "string") {
             try {
