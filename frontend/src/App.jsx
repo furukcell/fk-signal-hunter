@@ -17,6 +17,7 @@ export default function App(){
  const [market,setMarket]=useState(null);
  const [scanner,setScanner]=useState([]);
  const [error,setError]=useState(null);
+ const [paper,setPaper]=useState(null);
 
  useEffect(()=>{
   let alive=true;
@@ -26,7 +27,9 @@ export default function App(){
     if(!res.ok)throw new Error('Market scanner unavailable');
     const data=await res.json();
     const btc=data.markets?.find(m=>m.symbol==='BTCUSDT') ?? data.markets?.[0] ?? null;
-    if(alive){setScanner(data.markets ?? []);setMarket(btc);setError(null);}
+    const paperRes=await fetch('/api/paper');
+    const paperData=paperRes.ok?await paperRes.json():null;
+    if(alive){setScanner(data.markets ?? []);setMarket(btc);setPaper(paperData);setError(null);}
    }catch(err){if(alive)setError(err.message);}
   };
   load();
@@ -45,7 +48,7 @@ export default function App(){
   </aside>
   <main>
    <header><button className="menu" onClick={()=>setOpen(true)}><Menu size={20}/></button><div><small>PERSONAL TRADING SYSTEM</small><h1>{tab}</h1></div><div className="actions"><span className="market"><i className={connected?'live':''}/> {connected?'Market data connected':'Market data disconnected'}</span><button className="start" disabled><Bot size={15}/> Start Bot</button></div></header>
-   <section className="content">{tab==='Dashboard'?<DashboardContent market={market} scanner={scanner} score={score} connected={connected} error={error}/>:<ModuleView tab={tab}/>}</section>
+   <section className="content">{tab==='Dashboard'?<DashboardContent market={market} scanner={scanner} score={score} connected={connected} error={error} paper={paper}/>:<ModuleView tab={tab}/>}</section>
   </main>
  </div>
 }
@@ -55,7 +58,7 @@ function ModuleView({tab}){
  return <><div className="notice"><Activity size={17}/><div><b>{data[0]}</b> {data[1]}</div></div><div className="card empty"><Target size={24}/><h2>{tab} module ready</h2><p>The module shell is ready. Its data layer will be connected after the market-data foundation.</p></div></>
 }
 
-function DashboardContent({market,scanner=[],score,connected,error}){
+function DashboardContent({market,scanner=[],score,connected,error,paper}){
  const buy=market?.buyPressurePct;
  const total=market?.flowVolume;
  const status=score>=82?'WATCH':score>=70?'MONITOR':'WAIT';
@@ -64,7 +67,7 @@ function DashboardContent({market,scanner=[],score,connected,error}){
   <div className="notice"><Activity size={17}/><div><b>Paper trading only.</b> Public market data is connected; no exchange account or real order capability is enabled.</div></div>
   {error&&<div className="notice"><RefreshCw size={17}/><div><b>Market API:</b> {error}. Start the backend service to restore live data.</div></div>}
   <div className="stats">
-   <Stat icon={Wallet} label="Paper Balance" value="1,000.00 TL" detail="Real money disabled"/>
+   <Stat icon={Wallet} label="Paper Equity" value={(paper?.equity??1000).toFixed(2)+" TL"} detail={(paper?.returnPct??0).toFixed(2)+"% since start"}/>
    <Stat icon={TrendingUp} label="BTC Price" value={fmtPrice(market?.last)} detail={market?.lastTradeAt?new Date(market.lastTradeAt).toLocaleTimeString(): 'Waiting for stream'}/>
    <Stat icon={Gauge} label="Buy Pressure" value={buy==null?'—':buy.toFixed(1)+'%'} detail={total==null?'No trades yet':total.toFixed(4)+' BTC flow'}/>
    <Stat icon={Signal} label="Signal Score" value={score+' / 100'} detail="Current leader"/>
@@ -84,7 +87,7 @@ function DashboardContent({market,scanner=[],score,connected,error}){
    <section className="card risk"><div className="head"><div><small>SIGNAL</small><h2>Current Decision</h2></div><Signal size={18}/></div><div className="decision"><Score n={score}/><div><b>{status}</b><span>Initial rule set · score is informational only</span></div></div><Row a="Buy pressure" b={buy==null?'—':buy.toFixed(1)+'%'} p={(buy??0)+'%'}/><Row a="Book imbalance" b={market?.imbalancePct==null?'—':market.imbalancePct.toFixed(1)+'%'} p={Math.min(100,Math.abs(market?.imbalancePct??0)*2.5)+'%'}/><Row a="Spread" b={fmtPct(market?.spreadPct)} p={Math.min(100,((market?.spreadPct??0)/0.1)*100)+'%'}/><footer>● {connected?'Market stream healthy':'Waiting for market stream'}</footer></section>
   </div>
   <Table title="LIVE SIGNALS" subtitle="Top 100 market-cap scanner" action="Top 100 market cap"><thead><tr><th>PAIR</th><th>SCORE</th><th>BUY PRESSURE</th><th>24H QUOTE VOL</th><th>EXCHANGES</th><th>IMBALANCE</th><th>SPREAD</th><th>STATUS</th></tr></thead><tbody>{scanner.slice(0,10).map(m=>{const s=m.score??0;return <tr key={m.symbol}><td><b>{m.symbol.replace('USDT','/USDT')}</b></td><td><Score n={s}/></td><td>{m.buyPressurePct==null?'—':m.buyPressurePct.toFixed(1)+'%'}</td><td>{m.quoteVolume24h>=1e9?(m.quoteVolume24h/1e9).toFixed(2)+'B':(m.quoteVolume24h/1e6).toFixed(1)+'M'}</td><td>{exchangeCount(m)}/10</td><td>{m.imbalancePct==null?'—':m.imbalancePct.toFixed(1)+'%'}</td><td>{fmtPct(m.spreadPct)}</td><td><label className={'tag '+(s>=82?'good':'')}>{m.signal}</label></td></tr>})}</tbody></Table>
-  <Table title="RECENT ACTIVITY" subtitle="Paper Trades" action="No live orders"><thead><tr><th>TIME</th><th>PAIR</th><th>SIDE</th><th>ENTRY</th><th>SIZE</th><th>SCORE</th><th>NET P&L</th></tr></thead><tbody>{trades.map(t=><tr key={t[0]}><td className="muted">{t[0]}</td><td><b>{t[1]}</b></td><td className="muted">{t[2]}</td><td>{t[3]}</td><td>{t[4]}</td><td><Score n={t[5]}/></td><td className="muted">{t[6]}</td></tr>)}</tbody></Table>
+  <Table title="RECENT ACTIVITY" subtitle="Paper Trades" action={(paper?.trades?.length??0)+" trades"}><thead><tr><th>TIME</th><th>PAIR</th><th>SIDE</th><th>ENTRY</th><th>SIZE</th><th>SCORE</th><th>NET P&L</th></tr></thead><tbody>{(paper?.trades?.slice(0,10)??trades).map(t=>{const row=Array.isArray(t)?t:[new Date(t.closedAt).toLocaleTimeString(),t.symbol,t.side,t.entryPrice,t.quantity,t.score,t.netPnl];return <tr key={Array.isArray(t)?t[0]:t.id}><td className="muted">{t[0]}</td><td><b>{t[1]}</b></td><td className="muted">{t[2]}</td><td>{t[3]}</td><td>{t[4]}</td><td><Score n={t[5]}/></td><td className="muted">{Array.isArray(t)?t[6]:t.netPnl.toFixed(2)}</td></tr>})}</tbody></Table>
  </>
 }
 
