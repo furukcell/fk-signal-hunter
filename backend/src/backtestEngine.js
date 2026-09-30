@@ -54,7 +54,7 @@ function buildTrade(open, exitPrice, closedAt, reason) {
 function runBacktest(rows = [], options = {}) {
   const cfg = { ...DEFAULTS, ...options };
   const sorted = [...rows]
-    .filter(row => Number.isFinite(Number(row.ts)))
+    .filter(row => Number.isFinite(Number(row.ts)) && Number(row.activeExchangeCount ?? row.exchangeCount ?? 0) >= Number(cfg.minExchangeCount ?? 3))
     .sort((a, b) => Number(a.ts) - Number(b.ts));
 
   let balance = finite(cfg.initialBalance, 1000);
