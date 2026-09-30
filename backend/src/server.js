@@ -4,6 +4,7 @@ import { CrossExchangeHub, EXCHANGE_NAMES } from "./exchangeHub.js";
 import { PaperEngine } from "./paperEngine.js";
 import { buildOpportunity } from "./signalEngine.js";
 import { runBacktest } from "./backtestEngine.js";
+import { runWalkForward } from "./walkForwardEngine.js";
 import { HistoricalCollector } from "./historicalCollector.js";
 import { readHistoricalRows, historicalSummary } from "./historicalLoader.js";
 
@@ -671,6 +672,28 @@ function handleRoute(req, res) {
     return historicalSummary(process.env.HISTORICAL_DATA_DIR || "./data/historical")
       .then(summary => json(res, 200, summary))
       .catch(error => json(res, 500, { error: error.message || "Historical data unavailable" }));
+  }
+
+  if (req.method === "POST" && pathname === "/api/walk-forward") {
+    return readBody(req)
+      .then(async body => {
+        const directory = body.directory || process.env.HISTORICAL_DATA_DIR || "./data/historical";
+        const rows = Array.isArray(body.rows)
+          ? body.rows
+          : await readHistoricalRows({
+              directory,
+              date: body.date,
+              limit: Number(body.limit || 200000)
+            });
+
+        return json(res, 200, {
+          source: Array.isArray(body.rows) ? "request" : "historical",
+          rows: rows.length,
+          date: body.date || null,
+          result: runWalkForward(rows, body.options || {})
+        });
+      })
+      .catch(error => json(res, 400, { error: error.message || "Invalid walk-forward request" }));
   }
 
   if (req.method === "POST" && pathname === "/api/backtest") {
