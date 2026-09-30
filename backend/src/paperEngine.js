@@ -84,6 +84,7 @@ class PaperEngine {
     this.maxDrawdownPct = 0;
     this.equityHistory = [];
     this.signalStats = { actionable: 0, entries: 0, rejected: 0 };
+    this.lastActionableSampleAt = new Map();
   }
 
   fee(exchange, side = "taker") {
@@ -120,8 +121,13 @@ class PaperEngine {
     return value;
   }
 
-  recordSignal(actionable) {
-    if (actionable) this.signalStats.actionable += 1;
+  recordSignal(actionable, symbol = "GLOBAL", timestamp = Date.now()) {
+    if (!actionable) return;
+    const key = String(symbol);
+    const last = Number(this.lastActionableSampleAt.get(key) || 0);
+    if (Number(timestamp) - last < 5000) return;
+    this.lastActionableSampleAt.set(key, Number(timestamp));
+    this.signalStats.actionable += 1;
   }
 
   canOpen(timestamp = Date.now()) {
