@@ -848,4 +848,4 @@ process.on("SIGTERM", () => {
   apiServer.close(() => process.exit(0));
 });
 
-boot();\n
+boot();
