@@ -219,7 +219,8 @@ class CrossExchangeHub {
     const symbols = this.bases.map(x => x.toLowerCase() + "usdt");
     const streams = [];
     for (const s of symbols) {
-      streams.push(s + "@trade", s + "@bookTicker");\n      if (this.bases.indexOf(s.slice(0, -4).toUpperCase()) < 20) streams.push(s + "@depth20@100ms");
+      streams.push(s + "@trade", s + "@bookTicker");
+      if (this.bases.indexOf(s.slice(0, -4).toUpperCase()) < 20) streams.push(s + "@depth20@100ms");
     }
     for (let i = 0; i < streams.length; i += 160) {
       const chunk = streams.slice(i, i + 160);
@@ -239,6 +240,14 @@ class CrossExchangeHub {
           this.emit(normalize({
             exchange: "binance", symbol, baseAsset: base, quoteAsset: "USDT",
             price: msg.b, bid: msg.b, ask: msg.a, ts: msg.E, source: "book"
+          }));
+        } else if (msg.e === "depthUpdate") {
+          this.emit(normalize({
+            exchange: "binance", symbol, baseAsset: base, quoteAsset: "USDT",
+            price: msg.bids?.[0]?.[0], bid: msg.bids?.[0]?.[0], ask: msg.asks?.[0]?.[0],
+            bids: (msg.bids || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),
+            asks: (msg.asks || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),
+            ts: msg.E, source: "book"
           }));
         }
       });
@@ -270,7 +279,10 @@ class CrossExchangeHub {
         } else if (msg.arg?.channel === "books5") {
           this.emit(normalize({
             exchange: "okx", symbol: instId, baseAsset: base, quoteAsset: "USDT",
-            price: d.asks?.[0]?.[0] || d.bids?.[0]?.[0], bid: d.bids?.[0]?.[0], ask: d.asks?.[0]?.[0],\n            bids: (d.bids || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),\n            asks: (d.asks || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),\n            ts: d.ts, source: "book"
+            price: d.asks?.[0]?.[0] || d.bids?.[0]?.[0], bid: d.bids?.[0]?.[0], ask: d.asks?.[0]?.[0],
+            bids: (d.bids || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),
+            asks: (d.asks || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),
+            ts: d.ts, source: "book"
           }));
         }
       }, 18000);
