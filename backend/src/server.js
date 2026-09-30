@@ -679,7 +679,7 @@ async function handleRoute(req, res) {
     const totalActiveFeeds = rows.reduce((sum, x) => sum + Number(x.activeFeeds || 0), 0);
     const totalExpectedFeeds = rows.reduce((sum, x) => sum + Number(x.expectedFeeds || 0), 0);
     const marketRows = marketScanner();
-    const coveredMarkets = marketRows.filter(m => Number(m.exchangeCount || 0) >= 3).length;
+    const coveredMarkets = marketRows.filter(m => Number(m.activeExchangeCount || 0) >= 3).length;
     const historical = await historicalSummary(
       process.env.HISTORICAL_DATA_DIR || "./data/historical"
     );
