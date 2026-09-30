@@ -9,16 +9,24 @@ function Stat({icon:Icon,label,value,detail}){return <div className="card stat">
 function Score({n}){return <span className={'score '+(n>=85?'high':n>=75?'mid':'low')}>{n}</span>}
 
 export default function App(){
- const [open,setOpen]=useState(false);
+ const [open,setOpen]=useState(false); const [tab,setTab]=useState('Dashboard');
  return <div className="app">
   <aside className={open?'side open':'side'}>
    <div className="brand"><div className="mark"><Target size={18}/></div><div><b>FK SIGNAL HUNTER</b><span>Market Intelligence</span></div><button className="close" onClick={()=>setOpen(false)}><X size={18}/></button></div>
-   <nav>{nav.map(([name,Icon],i)=><button className={i===0?'active':''} key={name}><Icon size={17}/><span>{name}</span></button>)}</nav>
+   <nav>{nav.map(([name,Icon])=><button className={tab===name?'active':''} key={name} onClick={()=>{setTab(name);setOpen(false)}}><Icon size={17}/><span>{name}</span></button>)}</nav>
    <div className="bottom"><div className="paper"><i/> <div><b>PAPER MODE</b><span>Real money disabled</span></div></div><div className="engine"><Bot size={16}/> Engine <b>ONLINE</b></div></div>
   </aside>
   <main>
-   <header><button className="menu" onClick={()=>setOpen(true)}><Menu size={20}/></button><div><small>PERSONAL TRADING SYSTEM</small><h1>Dashboard</h1></div><div className="actions"><span className="market"><i/> Market data disconnected</span><button className="start"><Bot size={15}/> Start Bot</button></div></header>
+   <header><button className="menu" onClick={()=>setOpen(true)}><Menu size={20}/></button><div><small>PERSONAL TRADING SYSTEM</small><h1>{tab}</h1></div><div className="actions"><span className="market"><i/> Market data disconnected</span><button className="start"><Bot size={15}/> Start Bot</button></div></header>
    <section className="content">
+    {tab==='Dashboard' ? <DashboardContent/> : <ModuleView tab={tab}/>} 
+   </section>
+  </main>
+ </div>
+}
+function ModuleView({tab}){const data={Signals:['Live signal radar','Signal score, buy pressure, volume, spread and signal reasons.'],Trades:['Paper trade history','Entries, exits, fees, slippage and net P&L.'],Performance:['Performance analytics','Equity curve, expectancy, profit factor and drawdown.'],Risk:['Risk controls','Position sizing, daily loss, spread and exposure limits.'],Settings:['System settings','Signal threshold, TP/SL, position size, fee profile and bot controls.']}[tab];return <><div className="notice"><Activity size={17}/><div><b>{data[0]}</b> {data[1]}</div></div><div className="card empty"><Target size={24}/><h2>{tab} module ready</h2><p>This screen is API-ready. The data layer will be connected after the dashboard foundation.</p></div></>}
+function DashboardContent(){return <>
+
     <div className="notice"><Activity size={17}/><div><b>Paper trading is active.</b> Exchange APIs are not connected yet. No real orders can be placed.</div></div>
     <div className="stats">
      <Stat icon={Wallet} label="Paper Balance" value="1,000.00 TL" detail="+0.00% today"/>
@@ -33,9 +41,6 @@ export default function App(){
     </div>
     <Table title="LIVE SIGNALS" subtitle="Market Radar" action="View all signals →"><thead><tr><th>PAIR</th><th>SCORE</th><th>BUY PRESSURE</th><th>VOLUME</th><th>SPREAD</th><th>STATUS</th></tr></thead><tbody>{signals.map(s=><tr key={s[0]}><td><b>{s[0]}</b></td><td><Score n={s[1]}/></td><td>{s[2]}</td><td>{s[3]}</td><td>{s[4]}</td><td><label className="tag">{s[5]}</label></td></tr>)}</tbody></Table>
     <Table title="RECENT ACTIVITY" subtitle="Paper Trades" action="Trade history →"><thead><tr><th>TIME</th><th>PAIR</th><th>SIDE</th><th>ENTRY</th><th>SIZE</th><th>SCORE</th><th>NET P&L</th></tr></thead><tbody>{trades.map(t=><tr key={t[0]}><td className="muted">{t[0]}</td><td><b>{t[1]}</b></td><td className={t[2]==='BUY'?'buy':'sell'}>{t[2]}</td><td>{t[3]}</td><td>{t[4]}</td><td><Score n={t[5]}/></td><td className={t[6][0]==='+'?'positive':'negative'}>{t[6]} USDT</td></tr>)}</tbody></Table>
-   </section>
-  </main>
- </div>
-}
-function Row({a,b,p}){return <div className="riskrow"><div><span>{a}</span><b>{b}</b></div><div className="bar"><i style={{width:p}}/></div></div>}
-function Table({title,subtitle,action,children}){return <section className="card tableCard"><div className="head"><div><small>{title}</small><h2>{subtitle}</h2></div><button className="link">{action}</button></div><div className="scroll"><table>{children}</table></div></section>}
+
+</>}
+function Row
