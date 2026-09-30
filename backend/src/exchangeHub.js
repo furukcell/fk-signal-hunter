@@ -471,11 +471,23 @@ class CrossExchangeHub {
     if (!server || !token) throw new Error("KuCoin websocket configuration unavailable");
     const endpoint = server.endpoint + "?token=" + encodeURIComponent(token) + "&connectId=fk-signal-hunter";
     const ws = new WebSocket(endpoint);
+    let pingTimer;
     ws.on("open", () => {
       for (const base of this.bases) {
         ws.send(JSON.stringify({ id: Date.now().toString(), type: "subscribe", topic: "/market/match:" + base + "-USDT", response: true }));
         ws.send(JSON.stringify({ id: Date.now().toString(), type: "subscribe", topic: "/market/ticker:" + base + "-USDT", response: true }));
       }
+      // Classic public Spot WS recommends a ping every 18s.
+      pingTimer = setInterval(() => {
+        try {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ id: Date.now().toString(), type: "ping" }));
+          }
+        } catch {}
+      }, 18000);
+    });
+    ws.on("close", () => {
+      if (pingTimer) clearInterval(pingTimer);
     });
     this.attach("kucoin", ws, data => {
       const msg = JSON.parse(data.toString());
