@@ -145,14 +145,15 @@ class PaperEngine {
       slippagePct: fill.slippagePct,
       feePct: feeRate * 100
     });
-    const effectiveEntry = fill.averagePrice * (1 + feeRate);
+    const entryFee = fill.averagePrice * fill.quantity * feeRate;
+    const effectiveEntry = fill.averagePrice + (entryFee / Math.max(fill.quantity, 1e-12));
     const quantity = fill.quantity;
 
     const position = {
       symbol, exchange, quantity, allocation,
       entryPrice, effectiveEntry, lastPrice: entryPrice,
       entrySlippagePct: fill.slippagePct,
-      entryCostPct, feeRate, score, openedAt: timestamp,
+      entryCostPct, entryFee, feeRate, score, openedAt: timestamp,
       takeProfit: entryPrice * (1 + this.tpPct),
       stopLoss: entryPrice * (1 - this.slPct)
     };
@@ -185,7 +186,7 @@ class PaperEngine {
     const effectiveExit = exitFill.averagePrice;
     const grossPnl = (effectiveExit - p.entryPrice) * p.quantity;
     const exitFee = effectiveExit * p.quantity * p.feeRate;
-    const entryFee = p.entryPrice * p.quantity * p.feeRate;
+    const entryFee = Number(p.entryFee ?? (p.entryPrice * p.quantity * p.feeRate));
     const slippage = Math.max(0, (exitPrice - effectiveExit) * p.quantity);
     const netPnl = grossPnl - entryFee - exitFee;
 
