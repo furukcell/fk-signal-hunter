@@ -48,6 +48,8 @@ class HistoricalCollector {
       buyAbsorption: m.buyAbsorption,
       absorptionSignal: m.absorptionSignal,
       exchangeCount: m.exchangeCount,
+      activeExchangeCount: m.activeExchangeCount,
+      staleExchangeCount: m.staleExchangeCount,
       buyConsensus: m.buyConsensus,
       priceDispersionPct: m.priceDispersionPct,
       quoteVolume24h: m.quoteVolume24h,
