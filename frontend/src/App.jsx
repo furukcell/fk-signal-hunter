@@ -70,7 +70,7 @@ function ModuleView({tab}){
   let alive=true;
   const load=async()=>{
    try{
-    const path=tab==='Signals'?'/api/signals':'/api/paper';
+    const path=tab==='Signals'?'/api/signals':tab==='Risk'?'/api/data-health':'/api/paper';
     const r=await fetch(path);
     if(r.ok){const d=await r.json();if(alive)setData(d);}
    }catch{}
@@ -101,7 +101,17 @@ function ModuleView({tab}){
   </section></>;
  }
  if(tab==='Risk'){
-  return <><div className="stats"><Stat icon={ShieldCheck} label="Open Positions" value={(data?.openPositions?.length??0)+' / 2'} detail="Maximum positions"/><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper only"/><Stat icon={Gauge} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Current"/></div><div className="card empty"><ShieldCheck size={24}/><h2>Risk engine active</h2><p>Position sizing, maximum open positions and daily-loss protection are enforced by the paper engine.</p></div></>;
+  const h=data||{};
+  return <><div className="stats">
+   <Stat icon={ShieldCheck} label="Open Positions" value={(h.openPositions?.length??0)+' / 2'} detail="Paper risk limit"/>
+   <Stat icon={Activity} label="Feed Coverage" value={(h.feedCoveragePct??0).toFixed(1)+'%'} detail={(h.totalActiveFeeds??0)+' / '+(h.totalExpectedFeeds??0)+' active feeds'}/>
+   <Stat icon={Signal} label="Market Coverage" value={(h.marketCoveragePct??0).toFixed(1)+'%'} detail={(h.marketsWith3PlusExchanges??0)+' / '+(h.marketsTracked??0)+' markets'}/>
+   <Stat icon={BarChart3} label="Live Exchanges" value={(h.liveExchanges??0)+' / 10'} detail={(h.healthyExchanges??0)+' with ≥80% coverage'}/>
+  </div>
+  <section className="card tableCard"><div className="head"><div><small>DATA QUALITY</small><h2>Exchange Feed Health</h2></div><span className="tag good">LIVE</span></div>
+   <div className="tableWrap"><table><thead><tr><th>EXCHANGE</th><th>STATUS</th><th>ACTIVE</th><th>EXPECTED</th><th>COVERAGE</th><th>LAST UPDATE</th></tr></thead><tbody>{Object.entries(h.exchanges||{}).map(([name,x])=><tr key={name}><td><b>{name.toUpperCase()}</b></td><td><label className={'tag '+(x.status==='live'&&x.coveragePct>=80?'good':'')}>{x.status}</label></td><td>{x.activeFeeds}</td><td>{x.expectedFeeds}</td><td>{Number(x.coveragePct||0).toFixed(1)}%</td><td>{x.lastUpdateAt?new Date(x.lastUpdateAt).toLocaleTimeString():'—'}</td></tr>)}</tbody></table></div>
+  </section>
+  <section className="card empty"><ShieldCheck size={24}/><h2>Risk engine + data health</h2><p>Position sizing and loss controls remain paper-only. Feed coverage is shown separately so backtests and signals are not trusted blindly when market data is incomplete.</p></section></>;
  }
  return <><div className="notice"><Settings size={17}/><div><b>System settings.</b> Current paper parameters are intentionally conservative and are not validated trading rules.</div></div><div className="card empty"><Settings size={24}/><h2>Settings module</h2><p>Current defaults: 1,000 TL paper balance, 15% position size, max 2 positions, +2% TP, -0.8% SL.</p></div></>;
 }
