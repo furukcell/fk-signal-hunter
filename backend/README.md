@@ -56,7 +56,7 @@ Order-book walls can be cancelled or spoofed. Therefore book imbalance is never 
 Exchange credentials are intentionally not required at this stage.
 ## Firebase statistics storage
 
-Firebase is optional. If the three Admin SDK environment variables are not set, the backend runs normally without Firebase writes.
+Firebase is optional. If no Firebase credentials are set, the backend runs normally without Firebase writes.
 
 When enabled, only important events are persisted:
 
@@ -64,14 +64,16 @@ When enabled, only important events are persisted:
 - completed paper trades (`paperTrades`)
 - compact daily aggregates (`dailyStats`)
 
-Raw exchange trade/order-book events are **not** written to Firebase. This keeps Firestore usage intentionally small and leaves the high-frequency market stream in the backend's in-memory calculations.
+Raw exchange trade/order-book events are **not** written to Firebase. High-frequency market calculations remain in the backend.
 
-Set these variables in the backend `.env` (never commit the real values):
+### Recommended secret setup
 
-```text
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CLIENT_EMAIL=firebase-adminsdk-...@your-project-id.iam.gserviceaccount.com
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
-```
+For GitHub Actions or another deployment environment, store the complete Firebase service-account JSON as a secret named:
+
+`FIREBASE_SERVICE_ACCOUNT_JSON`
+
+The backend parses that JSON directly. The service-account file itself must **never** be committed to the repository.
+
+For local development, you can instead set `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` in `backend/.env`.
 
 A signal is recorded once when it becomes actionable (with a 5-minute per-symbol persistence guard), then its observed price outcome is stored at 1m, 5m, 15m and 30m checkpoints. Daily signal and paper-trading aggregates are flushed periodically rather than on every market event.
