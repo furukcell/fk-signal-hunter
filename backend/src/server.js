@@ -452,7 +452,14 @@ function handleExchangeEvent(event) {
   m.opportunity = opportunity;
 
   if (event.quoteAsset === "USDT" && event.price != null) {
-    const closed = paper.update(m.symbol, Number(event.price), event.ts);
+    const position = paper.positions.get(m.symbol);
+    const positionBook = position
+      ? (m.exchangeData[position.exchange] || {})
+      : {};
+    const closed = paper.update(m.symbol, Number(event.price), event.ts, {
+      bids: positionBook.bids || m.bids,
+      asks: positionBook.asks || m.asks
+    });
     if (closed) m.lastPaperTrade = closed;
   }
 
@@ -462,12 +469,15 @@ function handleExchangeEvent(event) {
     opportunity.bestBuy &&
     !paper.positions.has(m.symbol)
   ) {
+    const buyVenue = m.exchangeData[opportunity.bestBuy.exchange] || {};
     const opened = paper.open({
       symbol: m.symbol,
       exchange: opportunity.bestBuy.exchange,
       price: opportunity.bestBuy.ask,
       spreadPct: m.spreadPct || 0,
       score: m.score,
+      bids: buyVenue.bids || [],
+      asks: buyVenue.asks || [],
       timestamp: event.ts
     });
     if (opened.opened) m.lastPaperEntry = opened.position;
