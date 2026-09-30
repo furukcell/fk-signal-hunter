@@ -4,7 +4,7 @@ import path from "node:path";
 class HistoricalCollector {
   constructor(options = {}) {
     this.directory = options.directory || process.env.HISTORICAL_DATA_DIR || "./data/historical";
-    this.intervalMs = Number(options.intervalMs || 5000);
+    this.intervalMs = Number(options.intervalMs || 10000);
     this.timer = null;
     this.running = false;
     this.writeErrors = 0;
