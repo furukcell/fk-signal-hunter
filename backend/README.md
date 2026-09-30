@@ -54,3 +54,24 @@ These thresholds are starting parameters, not validated trading rules. They must
 Order-book walls can be cancelled or spoofed. Therefore book imbalance is never treated as a standalone buy signal. Executed trade flow and later persistence/replenishment measurements will be added before the strategy is considered mature.
 
 Exchange credentials are intentionally not required at this stage.
+## Firebase statistics storage
+
+Firebase is optional. If the three Admin SDK environment variables are not set, the backend runs normally without Firebase writes.
+
+When enabled, only important events are persisted:
+
+- actionable signal snapshots (`signals`)
+- completed paper trades (`paperTrades`)
+- compact daily aggregates (`dailyStats`)
+
+Raw exchange trade/order-book events are **not** written to Firebase. This keeps Firestore usage intentionally small and leaves the high-frequency market stream in the backend's in-memory calculations.
+
+Set these variables in the backend `.env` (never commit the real values):
+
+```text
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-...@your-project-id.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
+```
+
+A signal is recorded once when it becomes actionable (with a 5-minute per-symbol persistence guard), then its observed price outcome is stored at 1m, 5m, 15m and 30m checkpoints. Daily signal and paper-trading aggregates are flushed periodically rather than on every market event.
