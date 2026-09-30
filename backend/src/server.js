@@ -106,6 +106,8 @@ function handleExchangeEvent(event) {
     if (event.ask != null) m.ask = event.ask;
     if (event.price != null) m.last = event.price;
     if (event.spreadPct != null) m.spreadPct = event.spreadPct;
+    if (event.bids?.length) m.bids = event.bids;
+    if (event.asks?.length) m.asks = event.asks;
   } else if (event.source === "trade") {
     m.last = event.price ?? m.last;
     m.lastTradeAt = event.ts;
