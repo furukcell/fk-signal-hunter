@@ -472,19 +472,32 @@ class CrossExchangeHub {
     const endpoint = server.endpoint + "?token=" + encodeURIComponent(token) + "&connectId=fk-signal-hunter";
     const ws = new WebSocket(endpoint);
     let pingTimer;
-    ws.on("open", () => {
-      for (const base of this.bases) {
-        ws.send(JSON.stringify({ id: Date.now().toString(), type: "subscribe", topic: "/market/match:" + base + "-USDT", response: true }));
-        ws.send(JSON.stringify({ id: Date.now().toString(), type: "subscribe", topic: "/market/ticker:" + base + "-USDT", response: true }));
-      }
-      // Classic public Spot WS recommends a ping every 18s.
+    let pingIntervalMs = 18000;
+    const startPing = () => {
+      if (pingTimer) clearInterval(pingTimer);
       pingTimer = setInterval(() => {
         try {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ id: Date.now().toString(), type: "ping" }));
           }
         } catch {}
-      }, 18000);
+      }, Math.max(1000, pingIntervalMs));
+    };
+    ws.on("open", () => {
+      for (const base of this.bases) {
+        ws.send(JSON.stringify({ id: Date.now().toString(), type: "subscribe", topic: "/market/match:" + base + "-USDT", response: true }));
+        ws.send(JSON.stringify({ id: Date.now().toString(), type: "subscribe", topic: "/market/ticker:" + base + "-USDT", response: true }));
+      }
+      startPing();
+    });
+    ws.on("message", data => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.message === "welcome" && Number(msg.pingInterval) > 0) {
+          pingIntervalMs = Number(msg.pingInterval);
+          startPing();
+        }
+      } catch {}
     });
     ws.on("close", () => {
       if (pingTimer) clearInterval(pingTimer);
