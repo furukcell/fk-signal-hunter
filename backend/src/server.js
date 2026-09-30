@@ -7,6 +7,8 @@ import { runBacktest } from "./backtestEngine.js";
 import { runWalkForward } from "./walkForwardEngine.js";
 import { HistoricalCollector } from "./historicalCollector.js";
 import { readHistoricalRows, historicalSummary } from "./historicalLoader.js";
+import { FirebaseStore } from "./firebaseStore.js";
+import { SignalOutcomeTracker } from "./signalOutcomeTracker.js";
 
 const PORT = Number(process.env.PORT || 3001);
 const API = "https://api.binance.com";
@@ -34,6 +36,14 @@ const paper = new PaperEngine({
   cooldownMs: 60_000
 });
 const historical = new HistoricalCollector({ intervalMs: Number(process.env.HISTORICAL_INTERVAL_MS || 10000) });
+const firebaseStore = new FirebaseStore();
+const signalOutcomeTracker = new SignalOutcomeTracker({
+  store: firebaseStore,
+  getMarket: () => marketScanner()
+});
+const signalTrackerTimer = setInterval(() => {
+  signalOutcomeTracker.tick().catch(error => console.error("Signal outcome tracker failed:", error.message));
+}, 10000);
 
 function emptyMarket(symbol) {
   return {
@@ -481,6 +491,9 @@ function handleExchangeEvent(event) {
   }
   m.opportunity = opportunity;
 
+  const nowTs = Number(event.ts) || Date.now();
+  signalOutcomeTracker.observe(m, opportunity, nowTs);
+
   if (event.quoteAsset === "USDT" && event.price != null) {
     const position = paper.positions.get(m.symbol);
     const positionBook = position
@@ -490,10 +503,12 @@ function handleExchangeEvent(event) {
       bids: positionBook.bids || m.bids,
       asks: positionBook.asks || m.asks
     });
-    if (closed) m.lastPaperTrade = closed;
+    if (closed) {
+      m.lastPaperTrade = closed;
+      void firebaseStore.recordPaperTrade(closed);
+    }
   }
 
-  const nowTs = Number(event.ts) || Date.now();
   const qualifies = Boolean(
     opportunity?.actionable &&
     opportunity.buyConsensus >= 0.7 &&
@@ -695,6 +710,7 @@ async function handleRoute(req, res) {
       totalExpectedFeeds,
       feedCoveragePct: totalExpectedFeeds ? (totalActiveFeeds / totalExpectedFeeds) * 100 : 0,
       historical,
+      firebase: firebaseStore.snapshot(),
       paper: {
         equity: paper.balance + [...paper.positions.values()].reduce((sum, p) => sum + Number(p.quantity || 0) * Number(p.lastPrice || p.entryPrice || 0), 0),
         returnPct: paper.initialBalance ? ((paper.balance - paper.initialBalance) / paper.initialBalance) * 100 : 0,
@@ -837,6 +853,7 @@ async function boot() {
 process.on("SIGINT", () => {
   if (universeTimer) clearInterval(universeTimer);
   historical.stop();
+  clearInterval(signalTrackerTimer);
   hub?.stop();
   apiServer.close(() => process.exit(0));
 });
