@@ -8,12 +8,7 @@ function Stat({icon:Icon,label,value,detail}){return <div className="card stat">
 function Score({n}){return <span className={'score '+(n>=85?'high':n>=75?'mid':'low')}>{n}</span>}
 function fmtPrice(n){return n==null?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
 function fmtPct(n){return n==null?'—':n.toFixed(3)+'%'}
-function signalScore(market){
- if(!market?.connected||market.buyPressurePct==null)return 0;
- const pressure=Math.min(100,Math.max(0,market.buyPressurePct));
- const spreadPenalty=Math.min(20,(market.spreadPct||0)*400);
- return Math.round(Math.min(100,Math.max(0,50+(pressure-50)*1.25-spreadPenalty)));
-}
+function signalScore(market){ return market?.score ?? 0; }
 
 export default function App(){
  const [open,setOpen]=useState(false);
@@ -83,9 +78,9 @@ function DashboardContent({market,score,connected,error}){
     </div>
     <div className="flow"><span>Sell flow</span><div><i style={{width:(100-(buy??50))+'%'}}/><b>{buy==null?'—':(100-buy).toFixed(1)+'%'}</b></div><span>Buy flow</span></div>
    </section>
-   <section className="card risk"><div className="head"><div><small>SIGNAL</small><h2>Current Decision</h2></div><Signal size={18}/></div><div className="decision"><Score n={score}/><div><b>{status}</b><span>Initial rule set · score is informational only</span></div></div><Row a="Buy pressure" b={buy==null?'—':buy.toFixed(1)+'%'} p={(buy??0)+'%'}/><Row a="Spread" b={fmtPct(market?.spreadPct)} p={Math.min(100,((market?.spreadPct??0)/0.1)*100)+'%'}/><footer>● {connected?'Market stream healthy':'Waiting for market stream'}</footer></section>
+   <section className="card risk"><div className="head"><div><small>SIGNAL</small><h2>Current Decision</h2></div><Signal size={18}/></div><div className="decision"><Score n={score}/><div><b>{status}</b><span>Initial rule set · score is informational only</span></div></div><Row a="Buy pressure" b={buy==null?'—':buy.toFixed(1)+'%'} p={(buy??0)+'%'}/><Row a="Book imbalance" b={market?.imbalancePct==null?'—':market.imbalancePct.toFixed(1)+'%'} p={Math.min(100,Math.abs(market?.imbalancePct??0)*2.5)+'%'}/><Row a="Spread" b={fmtPct(market?.spreadPct)} p={Math.min(100,((market?.spreadPct??0)/0.1)*100)+'%'}/><footer>● {connected?'Market stream healthy':'Waiting for market stream'}</footer></section>
   </div>
-  <Table title="LIVE SIGNALS" subtitle="BTC/USDT Radar" action="Paper only"><thead><tr><th>PAIR</th><th>SCORE</th><th>BUY PRESSURE</th><th>FLOW</th><th>SPREAD</th><th>STATUS</th></tr></thead><tbody><tr><td><b>BTC/USDT</b></td><td><Score n={score}/></td><td>{buy==null?'—':buy.toFixed(1)+'%'}</td><td>{total==null?'—':total.toFixed(4)+' BTC'}</td><td>{fmtPct(market?.spreadPct)}</td><td><label className={'tag '+statusClass}>{status}</label></td></tr></tbody></Table>
+  <Table title="LIVE SIGNALS" subtitle="BTC/USDT Radar" action="Paper only"><thead><tr><th>PAIR</th><th>SCORE</th><th>BUY PRESSURE</th><th>FLOW</th><th>IMBALANCE</th><th>SPREAD</th><th>STATUS</th></tr></thead><tbody><tr><td><b>BTC/USDT</b></td><td><Score n={score}/></td><td>{buy==null?'—':buy.toFixed(1)+'%'}</td><td>{total==null?'—':total.toFixed(4)+' BTC'}</td><td>{market?.imbalancePct==null?'—':market.imbalancePct.toFixed(1)+'%'}</td><td>{fmtPct(market?.spreadPct)}</td><td><label className={'tag '+statusClass}>{status}</label></td></tr></tbody></Table>
   <Table title="RECENT ACTIVITY" subtitle="Paper Trades" action="No live orders"><thead><tr><th>TIME</th><th>PAIR</th><th>SIDE</th><th>ENTRY</th><th>SIZE</th><th>SCORE</th><th>NET P&L</th></tr></thead><tbody>{trades.map(t=><tr key={t[0]}><td className="muted">{t[0]}</td><td><b>{t[1]}</b></td><td className="muted">{t[2]}</td><td>{t[3]}</td><td>{t[4]}</td><td><Score n={t[5]}/></td><td className="muted">{t[6]}</td></tr>)}</tbody></Table>
  </>
 }
