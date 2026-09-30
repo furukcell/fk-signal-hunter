@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PaperEngine } from "../src/paperEngine.js";
 import { buildOpportunity } from "../src/signalEngine.js";
+import { SignalOutcomeTracker } from "../src/signalOutcomeTracker.js";
 
 test("PaperEngine opens and closes a position with fees", () => {
   const paper = new PaperEngine({
@@ -137,4 +138,50 @@ test("signal engine rejects stale exchange quotes", () => {
 
   assert.equal(opportunity.exchangeCount, 1);
   assert.equal(opportunity.actionable, false);
+});
+
+
+test("SignalOutcomeTracker records important signals and evaluates the 15m/30m outcome", async () => {
+  const writes = [];
+  const store = {
+    enabled: true,
+    async recordSignal(signal) { writes.push({ type: "signal", signal }); },
+    async recordSignalOutcome(id, outcome) { writes.push({ type: "outcome", id, outcome }); },
+    async writeDailySummary(date, summary) { writes.push({ type: "daily", date, summary }); }
+  };
+  let market = {
+    symbol: "BTCUSDT",
+    baseAsset: "BTC",
+    quoteAsset: "USDT",
+    last: 100,
+    score: 88,
+    signal: "WATCH",
+    buyPressurePct: 72,
+    volumeAnomaly: 2.7,
+    momentumPct1m: 0.4,
+    weightedImbalancePct: 15,
+    persistencePct: 70,
+    sellAbsorption: 0.8,
+    activeExchangeCount: 8,
+    buyConsensus: 0.78,
+    spreadPct: 0.01
+  };
+  const tracker = new SignalOutcomeTracker({
+    store,
+    getMarket: () => [market]
+  });
+  const t0 = Date.parse("2026-09-30T10:00:00.000Z");
+
+  tracker.observe(market, { actionable: true }, t0);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].type, "signal");
+
+  market = { ...market, last: 102.5 };
+  await tracker.tick(t0 + 30 * 60_000);
+
+  const outcomeWrite = writes.find(x => x.type === "outcome");
+  assert.ok(outcomeWrite);
+  assert.equal(outcomeWrite.outcome.result, "TP_REACHED");
+  assert.equal(outcomeWrite.outcome.movePct15m, 2.5);
+  assert.equal(outcomeWrite.outcome.movePct30m, 2.5);
 });
