@@ -21,6 +21,7 @@ class HistoricalCollector {
     return {
       ts: Date.now(),
       symbol: m.symbol,
+      exchange: m.opportunity?.bestBuy?.exchange || "binance",
       baseAsset: m.baseAsset,
       quoteAsset: m.quoteAsset,
       price: m.last,
