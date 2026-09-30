@@ -9,6 +9,90 @@ const EXCHANGE_NAMES = [
 const QUOTE_PRIORITY = ["USDT", "USDC", "USD", "KRW"];
 const MAX_SYMBOLS_PER_CONNECTION = 80;
 
+
+function readVarint(buf, index) {
+  let value = 0n;
+  let shift = 0n;
+  let i = index;
+  while (i < buf.length) {
+    const byte = buf[i++];
+    value |= BigInt(byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) break;
+    shift += 7n;
+    if (shift > 70n) throw new Error("protobuf varint too long");
+  }
+  return [value, i];
+}
+
+function readProtoFields(buf) {
+  const fields = new Map();
+  let i = 0;
+  while (i < buf.length) {
+    const [key, next] = readVarint(buf, i);
+    i = next;
+    const fieldNo = Number(key >> 3n);
+    const wire = Number(key & 7n);
+    let value;
+    if (wire === 0) {
+      [value, i] = readVarint(buf, i);
+      value = Number(value);
+    } else if (wire === 2) {
+      const [len, afterLen] = readVarint(buf, i);
+      i = afterLen;
+      const end = i + Number(len);
+      if (end > buf.length) throw new Error("protobuf length overflow");
+      value = buf.subarray(i, end);
+      i = end;
+    } else if (wire === 1) {
+      i += 8;
+    } else if (wire === 5) {
+      i += 4;
+    } else {
+      throw new Error("unsupported protobuf wire type " + wire);
+    }
+    const list = fields.get(fieldNo) || [];
+    list.push(value);
+    fields.set(fieldNo, list);
+  }
+  return fields;
+}
+
+function bytesText(value) {
+  return Buffer.from(value || []).toString("utf8");
+}
+
+function decodeMexcWrapper(data) {
+  const fields = readProtoFields(data);
+  const channel = bytesText(fields.get(1)?.[0]);
+  const symbol = bytesText(fields.get(3)?.[0]);
+  const sendTime = Number(fields.get(6)?.[0] || 0);
+  const deals = [];
+  for (const raw of fields.get(314) || []) {
+    const f = readProtoFields(raw);
+    for (const item of f.get(1) || []) {
+      const x = readProtoFields(item);
+      deals.push({
+        price: bytesText(x.get(1)?.[0]),
+        quantity: bytesText(x.get(2)?.[0]),
+        tradeType: Number(x.get(3)?.[0] || 0),
+        time: Number(x.get(4)?.[0] || sendTime)
+      });
+    }
+  }
+  let book = null;
+  const rawBook = fields.get(315)?.[0];
+  if (rawBook) {
+    const f = readProtoFields(rawBook);
+    book = {
+      bidPrice: bytesText(f.get(1)?.[0]),
+      bidQuantity: bytesText(f.get(2)?.[0]),
+      askPrice: bytesText(f.get(3)?.[0]),
+      askQuantity: bytesText(f.get(4)?.[0])
+    };
+  }
+  return { channel, symbol, sendTime, deals, book };
+}
+
 function cleanBase(symbol) {
   return String(symbol || "").toUpperCase().replace(/[-_/]/g, "").replace(/USDT|USDC|USD|KRW|BTC|EUR$/, "");
 }
@@ -391,11 +475,47 @@ class CrossExchangeHub {
   }
 
   async connect_mexc() {
-    // MEXC's current spot WebSocket market streams are protobuf based.
-    // Keep the connector explicit and isolated; it reports the venue as pending
-    // rather than pretending JSON payloads are compatible with the old API.
-    this.mark("mexc", "pending_protocol");
-    setTimeout(() => this.connect_mexc(), 60000);
+    const channels = [];
+    for (const base of this.bases) {
+      channels.push("spot@public.aggre.deals.v3.api.pb@100ms@" + base + "USDT");
+      channels.push("spot@public.aggre.bookTicker.v3.api.pb@100ms@" + base + "USDT");
+    }
+    for (let i = 0; i < channels.length; i += 30) {
+      const chunk = channels.slice(i, i + 30);
+      const ws = new WebSocket("wss://wbs-api.mexc.com/ws");
+      ws.on("open", () => {
+        ws.send(JSON.stringify({ method: "SUBSCRIPTION", params: chunk }));
+      });
+      this.attach("mexc-" + i, ws, data => {
+        if (typeof data === "string") {
+          try {
+            const msg = JSON.parse(data.toString());
+            if (msg.code || msg.msg || msg.type === "PONG") return;
+          } catch {}
+          return;
+        }
+        const decoded = decodeMexcWrapper(Buffer.from(data));
+        const symbol = decoded.symbol || "";
+        const base = symbol.endsWith("USDT") ? symbol.slice(0, -4) : "";
+        if (!base) return;
+        for (const deal of decoded.deals) {
+          this.emit(normalize({
+            exchange: "mexc", symbol, baseAsset: base, quoteAsset: "USDT",
+            price: deal.price, qty: deal.quantity,
+            side: deal.tradeType === 1 ? "buy" : deal.tradeType === 2 ? "sell" : null,
+            ts: deal.time
+          }));
+        }
+        if (decoded.book) {
+          this.emit(normalize({
+            exchange: "mexc", symbol, baseAsset: base, quoteAsset: "USDT",
+            price: decoded.book.bidPrice,
+            bid: decoded.book.bidPrice, ask: decoded.book.askPrice,
+            ts: decoded.sendTime, source: "book"
+          }));
+        }
+      }, 20000);
+    }
   }
 
   async connect_htx() {
