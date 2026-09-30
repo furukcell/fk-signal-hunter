@@ -3,6 +3,8 @@ import WebSocket from "ws";
 
 const PORT = Number(process.env.PORT || 3001);
 const API = "https://api.binance.com";
+const CG_API = "https://api.coingecko.com/api/v3";
+const COINGECKO_API_KEY = process.env.COINGECKO_API_KEY || "";
 const QUOTE = "USDT";
 const MAX_COINS = 100;
 const DEPTH_COINS = 20;
@@ -74,31 +76,57 @@ function updateSignal(m) {
 }
 
 async function loadUniverse() {
-  const [infoRes, tickerRes] = await Promise.all([
+  const [infoRes, tickerRes, cgRes] = await Promise.all([
     fetch(`${API}/api/v3/exchangeInfo`),
-    fetch(`${API}/api/v3/ticker/24hr`)
+    fetch(`${API}/api/v3/ticker/24hr`),
+    fetch(`${CG_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false&locale=en`, {
+      headers: COINGECKO_API_KEY ? {"x-cg-demo-api-key": COINGECKO_API_KEY} : {}
+    })
   ]);
+
   if (!infoRes.ok || !tickerRes.ok) throw new Error("Binance market discovery failed");
+  if (!cgRes.ok) throw new Error("CoinGecko market-cap discovery failed");
 
   const info = await infoRes.json();
   const tickers = await tickerRes.json();
+  const cgCoins = await cgRes.json();
+
   const allowed = new Map(
     info.symbols
       .filter(s => s.status === "TRADING" && s.quoteAsset === QUOTE && s.isSpotTradingAllowed)
       .map(s => [s.symbol, s])
   );
 
-  universe = tickers
-    .filter(t => allowed.has(t.symbol) && Number(t.quoteVolume) > 0)
-    .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
-    .slice(0, MAX_COINS)
-    .map((t, i) => ({
-      rank: i + 1,
-      symbol: t.symbol,
-      volume24h: Number(t.volume),
-      quoteVolume24h: Number(t.quoteVolume),
-      priceChangePct24h: Number(t.priceChangePercent)
-    }));
+  const tickerMap = new Map(tickers.map(t => [t.symbol, t]));
+  const stableSymbols = new Set(["USDT","USDC","FDUSD","TUSD","DAI","USDE","USDS","USDD","PYUSD"]);
+
+  // CoinGecko supplies the market-cap ranking; Binance supplies the actual tradable USDT pair.
+  const candidates = [];
+  for (const coin of cgCoins) {
+    const symbol = String(coin.symbol || "").toUpperCase();
+    if (stableSymbols.has(symbol)) continue;
+
+    const binanceSymbol = symbol + QUOTE;
+    if (!allowed.has(binanceSymbol)) continue;
+
+    const ticker = tickerMap.get(binanceSymbol);
+    if (!ticker || Number(ticker.quoteVolume) <= 0) continue;
+
+    candidates.push({
+      rank: candidates.length + 1,
+      marketCapRank: coin.market_cap_rank,
+      symbol: binanceSymbol,
+      baseAsset: symbol,
+      marketCapUsd: Number(coin.market_cap || 0),
+      volume24h: Number(ticker.volume || 0),
+      quoteVolume24h: Number(ticker.quoteVolume || 0),
+      priceChangePct24h: Number(ticker.priceChangePercent || 0)
+    });
+
+    if (candidates.length >= MAX_COINS) break;
+  }
+
+  universe = candidates;
 
   for (const item of universe) {
     const m = markets.get(item.symbol) || emptyMarket(item.symbol);
@@ -111,155 +139,3 @@ async function loadUniverse() {
 
   connectStreams();
 }
-
-function connectStreams() {
-  if (socket) {
-    try { socket.close(); } catch {}
-    socket = null;
-  }
-
-  if (!universe.length) return;
-
-  const depthSymbols = new Set(universe.slice(0, DEPTH_COINS).map(x => x.symbol));
-  const streams = universe.flatMap(x => {
-    const base = [`${x.symbol.toLowerCase()}@bookTicker`, `${x.symbol.toLowerCase()}@trade`];
-    if (depthSymbols.has(x.symbol)) base.push(`${x.symbol.toLowerCase()}@depth20@100ms`);
-    return base;
-  }).join("/");
-
-  socket = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
-
-  socket.on("open", () => {
-    for (const m of markets.values()) m.connected = true;
-  });
-
-  socket.on("message", raw => {
-    try {
-      const packet = JSON.parse(raw.toString());
-      const data = packet.data;
-      const m = markets.get(data.s);
-      if (!m) return;
-      const now = Date.now();
-
-      if (data.e === "bookTicker") {
-        m.bid = Number(data.b);
-        m.ask = Number(data.a);
-        m.last = m.last ?? Number(data.a);
-        m.spreadPct = m.bid > 0 ? ((m.ask - m.bid) / m.bid) * 100 : null;
-      }
-
-      if (data.e === "depthUpdate") {
-        m.bids = (data.b || []).slice(0, DEPTH_LEVELS).map(([price, qty]) => ({price:Number(price), qty:Number(qty)}));
-        m.asks = (data.a || []).slice(0, DEPTH_LEVELS).map(([price, qty]) => ({price:Number(price), qty:Number(qty)}));
-      }
-
-      if (data.e === "trade") {
-        const qty = Number(data.q);
-        m.last = Number(data.p);
-        m.trades += 1;
-        const buy = !data.m;
-        if (buy) m.buyVolume += qty;
-        else m.sellVolume += qty;
-        m.flow.push({time: now, qty, buy});
-        pruneFlow(m);
-        m.lastTradeAt = new Date(data.T || now).toISOString();
-      }
-
-      m.updatedAt = new Date().toISOString();
-      updateSignal(m);
-    } catch {
-      // Ignore malformed packets; the next stream packet remains usable.
-    }
-  });
-
-  socket.on("close", () => {
-    for (const m of markets.values()) m.connected = false;
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connectStreams, 1500);
-  });
-
-  socket.on("error", () => {
-    try { socket.close(); } catch {}
-  });
-}
-
-async function refreshUniverse() {
-  try {
-    await loadUniverse();
-    console.log(`Scanner universe: ${universe.length} USDT spot pairs`);
-  } catch (err) {
-    console.error(err.message);
-    clearTimeout(universeTimer);
-    universeTimer = setTimeout(refreshUniverse, 5000);
-  }
-}
-
-function snapshot(m) {
-  pruneFlow(m);
-  const total = m.buyVolume + m.sellVolume;
-  const windowBuy = m.flow.filter(x => x.buy).reduce((s, x) => s + x.qty, 0);
-  const windowSell = m.flow.filter(x => !x.buy).reduce((s, x) => s + x.qty, 0);
-  const windowTotal = windowBuy + windowSell;
-
-  return {
-    ...m,
-    flow: undefined,
-    buyPressurePct: total > 0 ? (m.buyVolume / total) * 100 : null,
-    flowVolume: total,
-    windowBuyVolume: windowBuy,
-    windowSellVolume: windowSell,
-    windowBuyPressurePct: windowTotal > 0 ? (windowBuy / windowTotal) * 100 : null
-  };
-}
-
-function scannerSnapshot() {
-  return universe.map((u) => snapshot(markets.get(u.symbol) || emptyMarket(u.symbol)))
-    .sort((a, b) => b.score - a.score);
-}
-
-const server = http.createServer((req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Content-Type", "application/json");
-
-  if (req.url === "/health") {
-    res.writeHead(200);
-    return res.end(JSON.stringify({
-      ok: true,
-      universeSize: universe.length,
-      streamConnected: Boolean(socket && socket.readyState === WebSocket.OPEN)
-    }));
-  }
-
-  if (req.url === "/api/market/scanner") {
-    res.writeHead(200);
-    return res.end(JSON.stringify({
-      universeSize: universe.length,
-      quote: QUOTE,
-      updatedAt: new Date().toISOString(),
-      markets: scannerSnapshot()
-    }));
-  }
-
-  if (req.url === "/api/market/btcusdt") {
-    const btc = markets.get("BTCUSDT");
-    res.writeHead(200);
-    return res.end(JSON.stringify(btc ? snapshot(btc) : {error:"BTCUSDT not in scanner universe"}));
-  }
-
-  if (req.url === "/api/market/reset-flow" && req.method === "POST") {
-    for (const m of markets.values()) {
-      m.buyVolume = 0; m.sellVolume = 0; m.trades = 0; m.flow = [];
-    }
-    res.writeHead(204);
-    return res.end();
-  }
-
-  res.writeHead(404);
-  res.end(JSON.stringify({error:"Not found"}));
-});
-
-server.listen(PORT, () => console.log(`FK Signal Hunter API listening on :${PORT}`));
-
-refreshUniverse();
-setInterval(refreshUniverse, REFRESH_UNIVERSE_MS);
