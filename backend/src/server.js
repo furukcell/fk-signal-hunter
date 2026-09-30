@@ -4,6 +4,7 @@ import { CrossExchangeHub, EXCHANGE_NAMES } from "./exchangeHub.js";
 import { PaperEngine } from "./paperEngine.js";
 import { buildOpportunity } from "./signalEngine.js";
 import { runBacktest } from "./backtestEngine.js";
+import { HistoricalCollector } from "./historicalCollector.js";
 
 const PORT = Number(process.env.PORT || 3001);
 const API = "https://api.binance.com";
@@ -22,6 +23,7 @@ let universe = [];
 let hub = null;
 let universeTimer = null;
 const paper = new PaperEngine({ initialBalance: 1000, positionPct: 0.15, tpPct: 0.02, slPct: 0.008, maxOpenPositions: 2 });
+const historical = new HistoricalCollector({ intervalMs: Number(process.env.HISTORICAL_INTERVAL_MS || 5000) });
 
 function emptyMarket(symbol) {
   return {
