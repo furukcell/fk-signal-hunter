@@ -647,6 +647,12 @@ function handleRoute(req, res) {
       totalExpectedFeeds,
       feedCoveragePct: totalExpectedFeeds ? (totalActiveFeeds / totalExpectedFeeds) * 100 : 0,
       historical,
+      paper: {
+        equity: paper.balance + [...paper.positions.values()].reduce((sum, p) => sum + Number(p.quantity || 0) * Number(p.lastPrice || p.entryPrice || 0), 0),
+        returnPct: paper.initialBalance ? ((paper.balance - paper.initialBalance) / paper.initialBalance) * 100 : 0,
+        openPositions: paper.positions.size,
+        maxOpenPositions: paper.maxOpenPositions
+      },
       exchanges: exchangeStatus
     });
   }
