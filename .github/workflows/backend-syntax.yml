@@ -28,6 +28,7 @@ jobs:
       - run: node --check src/historicalCollector.js
       - run: node --check src/historicalLoader.js
       - run: node --check src/walkForwardEngine.js
+      - run: npm test
       - name: Frontend build
         working-directory: frontend
         run: |
