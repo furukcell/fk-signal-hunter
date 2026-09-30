@@ -1,6 +1,12 @@
 import { FEE_PROFILES } from "./paperEngine.js";
 
-function buildOpportunity(market) {
+const DEFAULT_MIN_NET_EDGE_PCT = 0.15;
+
+function buildOpportunity(market, options = {}) {
+  const minNetEdgePct = Number.isFinite(Number(options.minNetEdgePct))
+    ? Number(options.minNetEdgePct)
+    : DEFAULT_MIN_NET_EDGE_PCT;
+
   const exchanges = Object.entries(market.exchangeData || {})
     .map(([exchange, d]) => ({ exchange, ...d }))
     .filter(x =>
@@ -44,7 +50,12 @@ function buildOpportunity(market) {
     estimatedNetCrossExchangeEdgePct,
     buyConsensus: consensus,
     liquidity24h: liquidity,
-    actionable: score >= 82 && exchanges.length >= 3
+    minNetEdgePct,
+    actionable:
+      score >= 82 &&
+      exchanges.length >= 3 &&
+      consensus >= 0.7 &&
+      estimatedNetCrossExchangeEdgePct >= minNetEdgePct
   };
 }
 
