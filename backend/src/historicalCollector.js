@@ -53,6 +53,8 @@ class HistoricalCollector {
       priceChangePct24h: m.priceChangePct24h,
       opportunity: m.opportunity
         ? {
+            bestBuyExchange: m.opportunity.bestBuy?.exchange || null,
+            bestSellExchange: m.opportunity.bestSell?.exchange || null,
             grossCrossExchangeSpreadPct: m.opportunity.grossCrossExchangeSpreadPct,
             estimatedRoundTripFeesPct: m.opportunity.estimatedRoundTripFeesPct,
             estimatedNetCrossExchangeEdgePct: m.opportunity.estimatedNetCrossExchangeEdgePct,
