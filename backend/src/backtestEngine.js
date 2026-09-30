@@ -17,7 +17,7 @@ const DEFAULTS = {
 };
 
 function fee(exchange) {
-  return (FEE_PROFILES[exchange]?.taker ?? 0.001);
+  return FEE_PROFILES[exchange]?.taker ?? 0.001;
 }
 
 function finite(value, fallback = 0) {
@@ -25,9 +25,9 @@ function finite(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function closePosition(open, exitPrice, closedAt, reason) {
-  const slippageRate = open.slippageBps / 10_000;
-  const exitFillPrice = exitPrice * (1 - slippageRate);
+function buildTrade(open, exitPrice, closedAt, reason) {
+  const exitSlippageRate = open.slippageBps / 10_000;
+  const exitFillPrice = exitPrice * (1 - exitSlippageRate);
   const exitNotional = exitFillPrice * open.quantity;
   const exitFee = exitNotional * open.feeRate;
   const gross = (exitFillPrice - open.entryFillPrice) * open.quantity;
@@ -42,8 +42,8 @@ function closePosition(open, exitPrice, closedAt, reason) {
     exitFillPrice,
     netPnl: net,
     fees: open.entryFee + exitFee,
-    slippage: open.allocation * (open.slippageBps / 10_000)
-      + Math.max(0, open.entryFillPrice - open.entryPrice) * open.quantity,
+    slippage: Math.abs(open.entryFillPrice - open.entryPrice) * open.quantity
+      + Math.abs(exitPrice - exitFillPrice) * open.quantity,
     reason,
     score: open.score,
     openedAt: open.openedAt,
@@ -59,18 +59,54 @@ function runBacktest(rows = [], options = {}) {
 
   let balance = finite(cfg.initialBalance, 1000);
   const positions = new Map();
+  const pendingEntries = new Map();
   const cooldowns = new Map();
   const trades = [];
   let peak = balance;
   let maxDrawdownPct = 0;
-  let previousPriceBySymbol = new Map();
+  const previousPriceBySymbol = new Map();
 
   const closeAndRecord = (symbol, open, price, ts, reason) => {
-    const trade = closePosition(open, price, ts, reason);
+    const trade = buildTrade(open, price, ts, reason);
     balance += open.allocation + trade.netPnl;
     trades.push(trade);
     positions.delete(symbol);
     cooldowns.set(symbol, ts + Number(cfg.cooldownMs));
+  };
+
+  const executeEntry = (pending, row) => {
+    const allocation = balance * Number(cfg.positionPct);
+    if (allocation <= 0) return false;
+
+    const exchange = pending.exchange || row.exchange || row.opportunity?.bestBuyExchange || "binance";
+    const feeRate = fee(exchange);
+    const spreadPct = Math.max(0, finite(row.spreadPct));
+    const slippagePct = Math.max(
+      finite(cfg.slippageBps) / 100,
+      spreadPct / 2
+    );
+    const slippageRate = slippagePct / 100;
+    const entryFillPrice = finite(row.price) * (1 + slippageRate);
+    if (!Number.isFinite(entryFillPrice) || entryFillPrice <= 0) return false;
+
+    balance -= allocation;
+    positions.set(pending.symbol, {
+      symbol: pending.symbol,
+      exchange,
+      allocation,
+      quantity: allocation / entryFillPrice,
+      entryPrice: finite(row.price),
+      entryFillPrice,
+      takeProfit: finite(row.price) * (1 + Number(cfg.tpPct)),
+      stopLoss: finite(row.price) * (1 - Number(cfg.slPct)),
+      feeRate,
+      entryFee: allocation * feeRate,
+      slippageBps: slippagePct * 100,
+      score: pending.score,
+      openedAt: row.ts,
+      lastPrice: finite(row.price)
+    });
+    return true;
   };
 
   for (const row of sorted) {
@@ -79,6 +115,16 @@ function runBacktest(rows = [], options = {}) {
 
     const symbol = row.symbol;
     if (!symbol) continue;
+
+    // Execute delayed entries at the first available sampled price after the delay.
+    const pending = pendingEntries.get(symbol);
+    if (pending && Number(row.ts) >= pending.executeAt && !positions.has(symbol)) {
+      pendingEntries.delete(symbol);
+      const cooldownUntil = cooldowns.get(symbol) || 0;
+      if (Number(row.ts) >= cooldownUntil) {
+        executeEntry(pending, row);
+      }
+    }
 
     const previousPrice = previousPriceBySymbol.get(symbol);
     const open = positions.get(symbol);
@@ -111,43 +157,31 @@ function runBacktest(rows = [], options = {}) {
     }
 
     const cooldownUntil = cooldowns.get(symbol) || 0;
-    const canEnter =
+    const slotsUsed = positions.size + pendingEntries.size;
+    const canSignal =
       !positions.has(symbol) &&
+      !pendingEntries.has(symbol) &&
       Number(row.ts) >= cooldownUntil &&
       Number(row.score || 0) >= Number(cfg.entryScore) &&
       Number(row.buyConsensus || 0) >= Number(cfg.minBuyConsensus) &&
       Number(row.exchangeCount || 0) >= Number(cfg.minExchangeCount) &&
-      positions.size < Number(cfg.maxOpenPositions);
+      slotsUsed < Number(cfg.maxOpenPositions);
 
-    if (canEnter) {
-      const allocation = balance * Number(cfg.positionPct);
-      if (allocation > 0) {
-        const exchange = row.exchange || row.opportunity?.bestBuyExchange || "binance";
-        const feeRate = fee(exchange);
-        const spreadPct = Math.max(0, finite(row.spreadPct));
-        const slippagePct = Math.max(
-          finite(cfg.slippageBps) / 100,
-          spreadPct / 2
-        );
-        const entryFillPrice = price * (1 + slippagePct / 100);
-        const entryFee = allocation * feeRate;
-
-        balance -= allocation;
-        positions.set(symbol, {
+    if (canSignal) {
+      const delay = Math.max(0, Number(cfg.entryDelayMs) || 0);
+      if (delay === 0) {
+        executeEntry({
           symbol,
-          exchange,
-          allocation,
-          quantity: allocation / entryFillPrice,
-          entryPrice: price,
-          entryFillPrice,
-          takeProfit: price * (1 + Number(cfg.tpPct)),
-          stopLoss: price * (1 - Number(cfg.slPct)),
-          feeRate,
-          entryFee,
-          slippageBps: slippagePct * 100,
+          exchange: row.exchange || row.opportunity?.bestBuyExchange || "binance",
+          score: Number(row.score || 0)
+        }, row);
+      } else {
+        pendingEntries.set(symbol, {
+          symbol,
+          exchange: row.exchange || row.opportunity?.bestBuyExchange || "binance",
           score: Number(row.score || 0),
-          openedAt: row.ts,
-          lastPrice: price
+          signalAt: row.ts,
+          executeAt: Number(row.ts) + delay
         });
       }
     }
@@ -169,11 +203,13 @@ function runBacktest(rows = [], options = {}) {
   for (const open of positions.values()) {
     const finalPrice = finite(open.lastPrice, NaN);
     if (!Number.isFinite(finalPrice) || finalPrice <= 0) continue;
-    const trade = closePosition(open, finalPrice, finalTs, "END_OF_DATA");
+    const trade = buildTrade(open, finalPrice, finalTs, "END_OF_DATA");
     balance += open.allocation + trade.netPnl;
     trades.push(trade);
   }
+
   positions.clear();
+  pendingEntries.clear();
 
   const wins = trades.filter(t => t.netPnl > 0);
   const losses = trades.filter(t => t.netPnl < 0);
