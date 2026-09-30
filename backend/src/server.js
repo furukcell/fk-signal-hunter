@@ -401,13 +401,15 @@ function handleExchangeEvent(event) {
     m.lastTradeAt = event.ts;
     m.trades += 1;
     const quoteQty = Number(event.quoteQty || 0);
-    if (event.side === "buy") m.buyVolume += quoteQty;
-    if (event.side === "sell") m.sellVolume += quoteQty;
     const tradeTime = Number(event.ts) || Date.now();
-    m.flow.push({ time: tradeTime, exchange: event.exchange, side: event.side, quoteQty });
-    if (Number(event.price) > 0) {
-      m.priceHistory.push({ time: tradeTime, price: Number(event.price) });
-      if (m.priceHistory.length > 5000) m.priceHistory.splice(0, m.priceHistory.length - 5000);
+    if (event.quoteAsset === "USDT" && quoteQty > 0) {
+      if (event.side === "buy") m.buyVolume += quoteQty;
+      if (event.side === "sell") m.sellVolume += quoteQty;
+      m.flow.push({ time: tradeTime, exchange: event.exchange, side: event.side, quoteQty });
+      if (Number(event.price) > 0) {
+        m.priceHistory.push({ time: tradeTime, price: Number(event.price) });
+        if (m.priceHistory.length > 5000) m.priceHistory.splice(0, m.priceHistory.length - 5000);
+      }
     }
   }
 
