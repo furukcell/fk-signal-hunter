@@ -29,7 +29,8 @@ function emptyMarket(symbol) {
     bid: null, ask: null, last: null, spreadPct: null,
     buyVolume: 0, sellVolume: 0, trades: 0, flowVolume: 0,
     buyPressurePct: null, lastTradeAt: null,
-    bids: [], asks: [], imbalancePct: null,
+    bids: [], asks: [], imbalancePct: null, weightedImbalancePct: null,
+    largeBidRatio: 0, largeAskRatio: 0,
     momentumPct1m: null, volumeRate1m: 0, volumeRateBaseline: 0, volumeAnomaly: 0,
     score: 50, signal: "WAIT", reasons: [],
     volume24h: 0, quoteVolume24h: 0, priceChangePct24h: 0,
@@ -69,6 +70,63 @@ function calculateFlowFeatures(m) {
   }
 }
 
+function calculateBookFeatures(m) {
+  const bid = Number(m.bid);
+  const ask = Number(m.ask);
+  if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) {
+    m.imbalancePct = null;
+    m.weightedImbalancePct = null;
+    m.largeBidRatio = 0;
+    m.largeAskRatio = 0;
+    return;
+  }
+
+  const mid = (bid + ask) / 2;
+  const normalizeLevels = levels => (levels || [])
+    .map(level => ({
+      price: Number(level.price),
+      qty: Number(level.qty)
+    }))
+    .filter(x => x.price > 0 && x.qty > 0);
+
+  const bids = normalizeLevels(m.bids);
+  const asks = normalizeLevels(m.asks);
+  const maxDistancePct = 0.50;
+
+  const weight = price => {
+    const distancePct = Math.abs(price - mid) / mid * 100;
+    if (distancePct > maxDistancePct) return 0;
+    return Math.max(0.1, 1 - distancePct / maxDistancePct);
+  };
+
+  const weightedBid = bids.reduce((sum, x) => sum + x.qty * weight(x.price), 0);
+  const weightedAsk = asks.reduce((sum, x) => sum + x.qty * weight(x.price), 0);
+  const weightedTotal = weightedBid + weightedAsk;
+
+  const rawBid = bids.reduce((sum, x) => sum + x.qty, 0);
+  const rawAsk = asks.reduce((sum, x) => sum + x.qty, 0);
+  const rawTotal = rawBid + rawAsk;
+
+  m.imbalancePct = rawTotal > 0 ? ((rawBid - rawAsk) / rawTotal) * 100 : null;
+  m.weightedImbalancePct = weightedTotal > 0
+    ? ((weightedBid - weightedAsk) / weightedTotal) * 100
+    : null;
+
+  const allNotional = [...bids, ...asks]
+    .filter(x => Math.abs(x.price - mid) / mid * 100 <= maxDistancePct)
+    .map(x => x.price * x.qty)
+    .sort((a, b) => b - a);
+
+  const totalNotional = allNotional.reduce((sum, x) => sum + x, 0);
+  const largeThreshold = totalNotional > 0 ? totalNotional * 0.08 : Infinity;
+  m.largeBidRatio = bids
+    .filter(x => x.price * x.qty >= largeThreshold)
+    .reduce((sum, x) => sum + x.price * x.qty, 0) / Math.max(1, totalNotional);
+  m.largeAskRatio = asks
+    .filter(x => x.price * x.qty >= largeThreshold)
+    .reduce((sum, x) => sum + x.price * x.qty, 0) / Math.max(1, totalNotional);
+}
+
 function updateSignal(m) {
   prune(m);
   const recentFlow = m.flow.filter(x => Number(x.quoteQty) > 0);
@@ -85,10 +143,7 @@ function updateSignal(m) {
   calculateFlowFeatures(m);
   m.buyPressurePct = total > 0 ? (recentBuy / total) * 100 : null;
 
-  const bidDepth = m.bids.reduce((s, x) => s + x.qty, 0);
-  const askDepth = m.asks.reduce((s, x) => s + x.qty, 0);
-  const bookTotal = bidDepth + askDepth;
-  m.imbalancePct = bookTotal > 0 ? ((bidDepth - askDepth) / bookTotal) * 100 : null;
+  calculateBookFeatures(m);
 
   let score = 50;
   const reasons = [];
@@ -100,11 +155,19 @@ function updateSignal(m) {
     else if (m.buyPressurePct <= 45) { score -= 9; reasons.push("Negative executed sell pressure"); }
   }
 
-  if (m.imbalancePct != null) {
-    if (m.imbalancePct >= 20) { score += 12; reasons.push("Bid-side book imbalance"); }
-    else if (m.imbalancePct >= 8) { score += 6; reasons.push("Mild bid-side imbalance"); }
-    else if (m.imbalancePct <= -20) { score -= 12; reasons.push("Ask-side book imbalance"); }
-    else if (m.imbalancePct <= -8) { score -= 6; reasons.push("Mild ask-side imbalance"); }
+  if (m.weightedImbalancePct != null) {
+    if (m.weightedImbalancePct >= 20) { score += 12; reasons.push("Near-book bid imbalance"); }
+    else if (m.weightedImbalancePct >= 8) { score += 6; reasons.push("Near-book bid pressure"); }
+    else if (m.weightedImbalancePct <= -20) { score -= 12; reasons.push("Near-book ask imbalance"); }
+    else if (m.weightedImbalancePct <= -8) { score -= 6; reasons.push("Near-book ask pressure"); }
+  }
+
+  if (m.largeBidRatio >= 0.08 && m.largeBidRatio > m.largeAskRatio) {
+    score += 4;
+    reasons.push("Large bid liquidity");
+  } else if (m.largeAskRatio >= 0.08 && m.largeAskRatio > m.largeBidRatio) {
+    score -= 4;
+    reasons.push("Large ask liquidity");
   }
 
   if (m.spreadPct != null) {
