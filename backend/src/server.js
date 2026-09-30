@@ -112,19 +112,23 @@ function calculateBookFeatures(m) {
     ? ((weightedBid - weightedAsk) / weightedTotal) * 100
     : null;
 
-  const allNotional = [...bids, ...asks]
-    .filter(x => Math.abs(x.price - mid) / mid * 100 <= maxDistancePct)
-    .map(x => x.price * x.qty)
-    .sort((a, b) => b - a);
+  const nearBids = bids.filter(x => Math.abs(x.price - mid) / mid * 100 <= maxDistancePct);
+  const nearAsks = asks.filter(x => Math.abs(x.price - mid) / mid * 100 <= maxDistancePct);
+  const bidNotional = nearBids.reduce((sum, x) => sum + x.price * x.qty, 0);
+  const askNotional = nearAsks.reduce((sum, x) => sum + x.price * x.qty, 0);
+  const totalNotional = bidNotional + askNotional;
 
-  const totalNotional = allNotional.reduce((sum, x) => sum + x, 0);
+  // A "large" level must represent at least 8% of the visible near-book notional.
   const largeThreshold = totalNotional > 0 ? totalNotional * 0.08 : Infinity;
-  m.largeBidRatio = bids
+  const largeBidNotional = nearBids
     .filter(x => x.price * x.qty >= largeThreshold)
-    .reduce((sum, x) => sum + x.price * x.qty, 0) / Math.max(1, totalNotional);
-  m.largeAskRatio = asks
+    .reduce((sum, x) => sum + x.price * x.qty, 0);
+  const largeAskNotional = nearAsks
     .filter(x => x.price * x.qty >= largeThreshold)
-    .reduce((sum, x) => sum + x.price * x.qty, 0) / Math.max(1, totalNotional);
+    .reduce((sum, x) => sum + x.price * x.qty, 0);
+
+  m.largeBidRatio = totalNotional > 0 ? largeBidNotional / totalNotional : 0;
+  m.largeAskRatio = totalNotional > 0 ? largeAskNotional / totalNotional : 0;
 }
 
 function updateSignal(m) {
