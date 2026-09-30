@@ -38,7 +38,7 @@ function emptyMarket(symbol) {
     momentumPct1m: null, volumeRate1m: 0, volumeRateBaseline: 0, volumeAnomaly: 0,
     score: 50, signal: "WAIT", reasons: [],
     volume24h: 0, quoteVolume24h: 0, priceChangePct24h: 0,
-    exchangeCount: 0, buyConsensus: 0, priceDispersionPct: null,
+    exchangeCount: 0, activeExchangeCount: 0, staleExchangeCount: 0, buyConsensus: 0, priceDispersionPct: null,
     exchangeData: {}, flow: [], priceHistory: [], bookSnapshots: [],
     persistencePct: null, bidPersistencePct: null, askPersistencePct: null,
     bookPullRatio: 0, bookReplenishmentRatio: 0,
@@ -410,10 +410,14 @@ function handleExchangeEvent(event) {
     }
   }
 
+  const now = Date.now();
   const venues = Object.values(m.exchangeData).filter(x => x.price != null || (x.bid != null && x.ask != null));
+  const activeVenues = venues.filter(x => Number(x.updatedAt || 0) > 0 && now - Number(x.updatedAt) <= 30_000);
   m.exchangeCount = venues.length;
+  m.activeExchangeCount = activeVenues.length;
+  m.staleExchangeCount = Math.max(0, venues.length - activeVenues.length);
 
-  const comparable = venues.filter(x => x.quoteAsset === "USDT");
+  const comparable = activeVenues.filter(x => x.quoteAsset === "USDT");
   const mids = comparable.map(x => {
     if (x.price != null) return Number(x.price);
     if (x.bid != null && x.ask != null) return (Number(x.bid) + Number(x.ask)) / 2;
@@ -443,7 +447,7 @@ function handleExchangeEvent(event) {
   m.buyConsensus = flowTotal > 0 ? flowBuy / flowTotal : 0;
 
   const usdt = m.exchangeData.binance;
-  if (usdt) {
+  if (usdt && Number(usdt.updatedAt || 0) > 0 && now - Number(usdt.updatedAt) <= 30_000) {
     if (usdt.bid != null) m.bid = usdt.bid;
     if (usdt.ask != null) m.ask = usdt.ask;
     if (usdt.price != null) m.last = usdt.price;
@@ -453,6 +457,10 @@ function handleExchangeEvent(event) {
   updateSignal(m);
 
   const opportunity = buildOpportunity(m);
+  if (opportunity && m.activeExchangeCount < 3) {
+    opportunity.actionable = false;
+    opportunity.inactiveExchangeCount = m.staleExchangeCount;
+  }
   m.opportunity = opportunity;
 
   if (event.quoteAsset === "USDT" && event.price != null) {
@@ -471,7 +479,8 @@ function handleExchangeEvent(event) {
     opportunity?.actionable &&
     opportunity.buyConsensus >= 0.7 &&
     opportunity.bestBuy &&
-    !paper.positions.has(m.symbol)
+    !paper.positions.has(m.symbol) &&
+    m.activeExchangeCount >= 3
   ) {
     const buyVenue = m.exchangeData[opportunity.bestBuy.exchange] || {};
     const opened = paper.open({
