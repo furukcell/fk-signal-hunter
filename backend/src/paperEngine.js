@@ -80,6 +80,10 @@ class PaperEngine {
     this.lastClosedAt = new Map();
     this.dayStartBalance = this.balance;
     this.dayKey = this.currentDayKey();
+    this.peakEquity = this.balance;
+    this.maxDrawdownPct = 0;
+    this.equityHistory = [];
+    this.signalStats = { actionable: 0, entries: 0, rejected: 0 };
   }
 
   fee(exchange, side = "taker") {
@@ -116,6 +120,10 @@ class PaperEngine {
     return value;
   }
 
+  recordSignal(actionable) {
+    if (actionable) this.signalStats.actionable += 1;
+  }
+
   canOpen(timestamp = Date.now()) {
     this.ensureDay(timestamp);
     const equity = this.equity();
@@ -125,11 +133,18 @@ class PaperEngine {
 
   open({ symbol, exchange = "binance", price, spreadPct = 0, score = 0, bids = [], asks = [], timestamp = Date.now() }) {
     this.ensureDay(timestamp);
-    if (!this.canOpen(timestamp)) return { opened: false, reason: "risk_limit" };
-    if (this.positions.has(symbol)) return { opened: false, reason: "already_open" };
+    if (!this.canOpen(timestamp)) {
+      this.signalStats.rejected += 1;
+      return { opened: false, reason: "risk_limit" };
+    }
+    if (this.positions.has(symbol)) {
+      this.signalStats.rejected += 1;
+      return { opened: false, reason: "already_open" };
+    }
 
     const lastClosed = Number(this.lastClosedAt.get(symbol) || 0);
     if (lastClosed && Number(timestamp) - lastClosed < this.cooldownMs) {
+      this.signalStats.rejected += 1;
       return { opened: false, reason: "cooldown" };
     }
 
@@ -160,6 +175,7 @@ class PaperEngine {
 
     this.balance -= allocation;
     this.positions.set(symbol, position);
+    this.signalStats.entries += 1;
     return { opened: true, position };
   }
 
@@ -220,6 +236,11 @@ class PaperEngine {
   snapshot(prices = {}) {
     this.ensureDay();
     const equity = this.equity(prices);
+    this.peakEquity = Math.max(this.peakEquity, equity);
+    const drawdownPct = this.peakEquity > 0 ? ((this.peakEquity - equity) / this.peakEquity) * 100 : 0;
+    this.maxDrawdownPct = Math.max(this.maxDrawdownPct, drawdownPct);
+    this.equityHistory.push({ ts: Date.now(), equity });
+    if (this.equityHistory.length > 2000) this.equityHistory.splice(0, this.equityHistory.length - 2000);
     const realized = this.trades.reduce((sum, t) => sum + t.netPnl, 0);
     const wins = this.trades.filter(t => t.netPnl > 0);
     const losses = this.trades.filter(t => t.netPnl < 0);
@@ -234,7 +255,10 @@ class PaperEngine {
       trades: this.trades,
       winRate: this.trades.length ? wins.length / this.trades.length : 0,
       profitFactor: grossLoss ? grossProfit / grossLoss : null,
-      returnPct: ((equity - this.initialBalance) / this.initialBalance) * 100
+      returnPct: ((equity - this.initialBalance) / this.initialBalance) * 100,
+      maxDrawdownPct: this.maxDrawdownPct,
+      equityHistory: this.equityHistory,
+      signalStats: { ...this.signalStats }
     };
   }
 }
