@@ -179,7 +179,34 @@ class CrossExchangeHub {
   }
 
   getStatus() {
-    return Object.fromEntries(EXCHANGE_NAMES.map(x => [x, this.status.get(x) || "offline"]));
+    const now = Date.now();
+    const staleMs = 30_000;
+    const result = {};
+
+    for (const exchange of EXCHANGE_NAMES) {
+      let active = 0;
+      let stale = 0;
+      let lastUpdateAt = null;
+
+      for (const base of this.bases) {
+        const value = this.latest.get(this.key(exchange, base));
+        if (!value?.updatedAt) continue;
+        lastUpdateAt = Math.max(lastUpdateAt || 0, value.updatedAt);
+        if (now - value.updatedAt <= staleMs) active += 1;
+        else stale += 1;
+      }
+
+      result[exchange] = {
+        status: this.status.get(exchange) || "offline",
+        activeFeeds: active,
+        staleFeeds: stale,
+        expectedFeeds: this.bases.length,
+        coveragePct: this.bases.length ? (active / this.bases.length) * 100 : 0,
+        lastUpdateAt
+      };
+    }
+
+    return result;
   }
 
   async connectExchange(exchange) {
