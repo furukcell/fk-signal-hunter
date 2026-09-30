@@ -54,8 +54,37 @@ export default function App(){
 }
 
 function ModuleView({tab}){
- const data={Signals:['Live signal radar','Signal score, buy pressure, volume, spread and signal reasons.'],Trades:['Paper trade history','Entries, exits, fees, slippage and net P&L.'],Performance:['Performance analytics','Equity curve, expectancy, profit factor and drawdown.'],Risk:['Risk controls','Position sizing, daily loss, spread and exposure limits.'],Settings:['System settings','Signal threshold, TP/SL, position size, fee profile and bot controls.']}[tab];
- return <><div className="notice"><Activity size={17}/><div><b>{data[0]}</b> {data[1]}</div></div><div className="card empty"><Target size={24}/><h2>{tab} module ready</h2><p>The module shell is ready. Its data layer will be connected after the market-data foundation.</p></div></>
+ const [data,setData]=useState(null);
+ useEffect(()=>{
+  let alive=true;
+  const load=async()=>{
+   try{
+    const path=tab==='Signals'?'/api/signals':'/api/paper';
+    const r=await fetch(path);
+    if(r.ok){const d=await r.json();if(alive)setData(d);}
+   }catch{}
+  };
+  load(); const id=setInterval(load,2000);
+  return()=>{alive=false;clearInterval(id)};
+ },[tab]);
+
+ if(tab==='Signals'){
+  return <><div className="notice"><Signal size={17}/><div><b>Live signal radar.</b> Cross-exchange confirmation, buy pressure, spread and opportunity data.</div></div>
+   <Table title="SIGNAL RADAR" subtitle="Live" action={(data?.signals?.length??0)+" candidates"}><thead><tr><th>PAIR</th><th>SCORE</th><th>BUY PRESSURE</th><th>EXCHANGES</th><th>CONSENSUS</th><th>EDGE</th><th>STATUS</th></tr></thead><tbody>{(data?.signals??[]).slice(0,20).map(m=><tr key={m.symbol}><td><b>{m.symbol.replace('USDT','/USDT')}</b></td><td><Score n={m.score}/></td><td>{m.buyPressurePct==null?'—':m.buyPressurePct.toFixed(1)+'%'}</td><td>{m.exchangeCount}/10</td><td>{(m.buyConsensus*100).toFixed(0)}%</td><td>{m.opportunity?.estimatedNetCrossExchangeEdgePct==null?'—':m.opportunity.estimatedNetCrossExchangeEdgePct.toFixed(3)+'%'}</td><td><label className={'tag '+(m.signal==='WATCH'?'good':'')}>{m.signal}</label></td></tr>)}</tbody></Table></>;
+ }
+ if(tab==='Trades'){
+  return <><div className="notice"><ListFilter size={17}/><div><b>Paper trades.</b> No real orders are enabled.</div></div><Table title="PAPER TRADES" subtitle="Execution log" action={(data?.trades?.length??0)+" trades"}><thead><tr><th>TIME</th><th>PAIR</th><th>EXCHANGE</th><th>ENTRY</th><th>EXIT</th><th>NET P&L</th><th>REASON</th></tr></thead><tbody>{(data?.trades??[]).slice(0,50).map(t=><tr key={t.id}><td>{new Date(t.closedAt).toLocaleTimeString()}</td><td><b>{t.symbol}</b></td><td>{t.exchange}</td><td>{Number(t.entryPrice).toFixed(4)}</td><td>{Number(t.exitPrice).toFixed(4)}</td><td>{Number(t.netPnl).toFixed(2)}</td><td>{t.reason}</td></tr>)}</tbody></Table></>;
+ }
+ if(tab==='Performance'){
+  const trades=data?.trades??[];
+  const wins=trades.filter(t=>t.netPnl>0).length;
+  const pf=(()=>{const gp=trades.filter(t=>t.netPnl>0).reduce((s,t)=>s+t.netPnl,0);const gl=Math.abs(trades.filter(t=>t.netPnl<0).reduce((s,t)=>s+t.netPnl,0));return gl?gp/gl:null})();
+  return <><div className="stats"><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper"/><Stat icon={TrendingUp} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Since start"/><Stat icon={Target} label="Win Rate" value={trades.length?((wins/trades.length)*100).toFixed(1)+'%':'—'} detail={trades.length+' closed trades'}/><Stat icon={Gauge} label="Profit Factor" value={pf==null?'—':pf.toFixed(2)} detail="Net after modeled costs"/></div><div className="card empty"><BarChart3 size={24}/><h2>Performance data layer connected</h2><p>Equity, return, win rate and profit factor are now fed from the paper engine. Historical equity curve and walk-forward reports come next.</p></div></>;
+ }
+ if(tab==='Risk'){
+  return <><div className="stats"><Stat icon={ShieldCheck} label="Open Positions" value={(data?.openPositions?.length??0)+' / 2'} detail="Maximum positions"/><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper only"/><Stat icon={Gauge} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Current"/></div><div className="card empty"><ShieldCheck size={24}/><h2>Risk engine active</h2><p>Position sizing, maximum open positions and daily-loss protection are enforced by the paper engine.</p></div></>;
+ }
+ return <><div className="notice"><Settings size={17}/><div><b>System settings.</b> Current paper parameters are intentionally conservative and are not validated trading rules.</div></div><div className="card empty"><Settings size={24}/><h2>Settings module</h2><p>Current defaults: 1,000 TL paper balance, 15% position size, max 2 positions, +2% TP, -0.8% SL.</p></div></>;
 }
 
 function DashboardContent({market,scanner=[],score,connected,error,paper}){
