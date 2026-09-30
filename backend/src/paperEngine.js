@@ -74,9 +74,12 @@ class PaperEngine {
     this.slPct = Number(options.slPct || DEFAULT_SL_PCT);
     this.maxOpenPositions = Number(options.maxOpenPositions || 2);
     this.dailyLossPct = Number(options.dailyLossPct || 0.015);
+    this.cooldownMs = Number(options.cooldownMs || 60_000);
     this.positions = new Map();
     this.trades = [];
+    this.lastClosedAt = new Map();
     this.dayStartBalance = this.balance;
+    this.dayKey = this.currentDayKey();
   }
 
   fee(exchange, side = "taker") {
@@ -84,8 +87,24 @@ class PaperEngine {
     return side === "maker" ? p.maker : p.taker;
   }
 
-  resetDay() {
+  currentDayKey(timestamp = Date.now()) {
+    const d = new Date(timestamp);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  ensureDay(timestamp = Date.now()) {
+    const key = this.currentDayKey(timestamp);
+    if (key !== this.dayKey) {
+      this.dayKey = key;
+      this.dayStartBalance = this.equity();
+      this.lastClosedAt.clear();
+    }
+  }
+
+  resetDay(timestamp = Date.now()) {
+    this.dayKey = this.currentDayKey(timestamp);
     this.dayStartBalance = this.equity();
+    this.lastClosedAt.clear();
   }
 
   equity(prices = {}) {
@@ -97,15 +116,22 @@ class PaperEngine {
     return value;
   }
 
-  canOpen() {
+  canOpen(timestamp = Date.now()) {
+    this.ensureDay(timestamp);
     const equity = this.equity();
     const dailyLoss = Math.max(0, (this.dayStartBalance - equity) / this.dayStartBalance);
     return this.positions.size < this.maxOpenPositions && dailyLoss < this.dailyLossPct;
   }
 
   open({ symbol, exchange = "binance", price, spreadPct = 0, score = 0, bids = [], asks = [], timestamp = Date.now() }) {
-    if (!this.canOpen()) return { opened: false, reason: "risk_limit" };
+    this.ensureDay(timestamp);
+    if (!this.canOpen(timestamp)) return { opened: false, reason: "risk_limit" };
     if (this.positions.has(symbol)) return { opened: false, reason: "already_open" };
+
+    const lastClosed = Number(this.lastClosedAt.get(symbol) || 0);
+    if (lastClosed && Number(timestamp) - lastClosed < this.cooldownMs) {
+      return { opened: false, reason: "cooldown" };
+    }
 
     const entryPrice = Number(price);
     if (!Number.isFinite(entryPrice) || entryPrice <= 0) return { opened: false, reason: "invalid_price" };
@@ -137,6 +163,7 @@ class PaperEngine {
   }
 
   update(symbol, price, timestamp = Date.now(), book = {}) {
+    this.ensureDay(timestamp);
     const p = this.positions.get(symbol);
     if (!p) return null;
     const current = Number(price);
@@ -148,6 +175,7 @@ class PaperEngine {
   }
 
   close(symbol, price, reason = "SIGNAL", timestamp = Date.now(), book = {}) {
+    this.ensureDay(timestamp);
     const p = this.positions.get(symbol);
     if (!p) return null;
 
@@ -163,6 +191,7 @@ class PaperEngine {
 
     this.balance += p.allocation + netPnl;
     this.positions.delete(symbol);
+    this.lastClosedAt.set(symbol, timestamp);
 
     const trade = {
       id: String(timestamp) + "-" + symbol,
@@ -188,6 +217,7 @@ class PaperEngine {
   }
 
   snapshot(prices = {}) {
+    this.ensureDay();
     const equity = this.equity(prices);
     const realized = this.trades.reduce((sum, t) => sum + t.netPnl, 0);
     const wins = this.trades.filter(t => t.netPnl > 0);
