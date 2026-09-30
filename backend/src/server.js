@@ -25,7 +25,7 @@ let universe = [];
 let hub = null;
 let universeTimer = null;
 const paper = new PaperEngine({ initialBalance: 1000, positionPct: 0.15, tpPct: 0.02, slPct: 0.008, maxOpenPositions: 2 });
-const historical = new HistoricalCollector({ intervalMs: Number(process.env.HISTORICAL_INTERVAL_MS || 5000) });
+const historical = new HistoricalCollector({ intervalMs: Number(process.env.HISTORICAL_INTERVAL_MS || 10000) });
 
 function emptyMarket(symbol) {
   return {
@@ -42,6 +42,7 @@ function emptyMarket(symbol) {
     exchangeData: {}, flow: [], priceHistory: [], bookSnapshots: [],
     persistencePct: null, bidPersistencePct: null, askPersistencePct: null,
     bookPullRatio: 0, bookReplenishmentRatio: 0,
+    actionableConfirmations: 0, actionableLastSampleAt: null,
     sellAbsorption: 0, buyAbsorption: 0, absorptionSignal: "NONE", updatedAt: null
   };
 }
@@ -475,12 +476,29 @@ function handleExchangeEvent(event) {
     if (closed) m.lastPaperTrade = closed;
   }
 
-  if (
+  const nowTs = Number(event.ts) || Date.now();
+  const qualifies = Boolean(
     opportunity?.actionable &&
     opportunity.buyConsensus >= 0.7 &&
     opportunity.bestBuy &&
-    !paper.positions.has(m.symbol) &&
     m.activeExchangeCount >= 3
+  );
+
+  if (qualifies) {
+    const lastSample = Number(m.actionableLastSampleAt || 0);
+    if (!lastSample || nowTs - lastSample >= 1000) {
+      m.actionableConfirmations = Number(m.actionableConfirmations || 0) + 1;
+      m.actionableLastSampleAt = nowTs;
+    }
+  } else if (m.actionableConfirmations || m.actionableLastSampleAt) {
+    m.actionableConfirmations = 0;
+    m.actionableLastSampleAt = null;
+  }
+
+  if (
+    qualifies &&
+    m.actionableConfirmations >= 3 &&
+    !paper.positions.has(m.symbol)
   ) {
     const buyVenue = m.exchangeData[opportunity.bestBuy.exchange] || {};
     const opened = paper.open({
@@ -491,9 +509,13 @@ function handleExchangeEvent(event) {
       score: m.score,
       bids: buyVenue.bids || [],
       asks: buyVenue.asks || [],
-      timestamp: event.ts
+      timestamp: nowTs
     });
-    if (opened.opened) m.lastPaperEntry = opened.position;
+    if (opened.opened) {
+      m.lastPaperEntry = opened.position;
+      m.actionableConfirmations = 0;
+      m.actionableLastSampleAt = null;
+    }
   }
 }
 
