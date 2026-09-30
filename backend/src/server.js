@@ -536,7 +536,7 @@ function handleExchangeEvent(event) {
   }
 }
 
-\n\nasync function loadUniverse() {
+async function loadUniverse() {
   const [infoRes, tickerRes, cgRes] = await Promise.all([
     fetch(`${API}/api/v3/exchangeInfo`),
     fetch(`${API}/api/v3/ticker/24hr`),
