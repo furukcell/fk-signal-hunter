@@ -623,6 +623,34 @@ function handleRoute(req, res) {
     return json(res, 200, hub?.getStatus?.() || {});
   }
 
+  if (req.method === "GET" && pathname === "/api/data-health") {
+    const exchangeStatus = hub?.getStatus?.() || {};
+    const rows = Object.values(exchangeStatus);
+    const liveExchanges = rows.filter(x => x.status === "live").length;
+    const healthyExchanges = rows.filter(x => x.coveragePct >= 80).length;
+    const totalActiveFeeds = rows.reduce((sum, x) => sum + Number(x.activeFeeds || 0), 0);
+    const totalExpectedFeeds = rows.reduce((sum, x) => sum + Number(x.expectedFeeds || 0), 0);
+    const marketRows = marketScanner();
+    const coveredMarkets = marketRows.filter(m => Number(m.exchangeCount || 0) >= 3).length;
+    const historical = await historicalSummary(
+      process.env.HISTORICAL_DATA_DIR || "./data/historical"
+    );
+
+    return json(res, 200, {
+      universe: universe.length,
+      marketsTracked: marketRows.length,
+      marketsWith3PlusExchanges: coveredMarkets,
+      marketCoveragePct: marketRows.length ? (coveredMarkets / marketRows.length) * 100 : 0,
+      liveExchanges,
+      healthyExchanges,
+      totalActiveFeeds,
+      totalExpectedFeeds,
+      feedCoveragePct: totalExpectedFeeds ? (totalActiveFeeds / totalExpectedFeeds) * 100 : 0,
+      historical,
+      exchanges: exchangeStatus
+    });
+  }
+
   if (req.method === "GET" && pathname === "/api/market/btcusdt") {
     const m = markets.get("BTCUSDT") || emptyMarket("BTCUSDT");
     return json(res, 200, m);
