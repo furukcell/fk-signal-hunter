@@ -136,10 +136,20 @@ function handleExchangeEvent(event) {
     m.priceDispersionPct = avg > 0 ? ((max - min) / avg) * 100 : null;
   }
 
-  const directional = comparable.filter(x => x.side === "buy" || x.side === "sell");
-  m.buyConsensus = directional.length
-    ? directional.filter(x => x.side === "buy").length / directional.length
-    : 0;
+  const usdtExchanges = new Set(comparable.map(x => x.exchange));
+  const comparableFlow = m.flow.filter(x =>
+    usdtExchanges.has(x.exchange) &&
+    (x.side === "buy" || x.side === "sell") &&
+    Number(x.quoteQty) > 0
+  );
+  const flowBuy = comparableFlow
+    .filter(x => x.side === "buy")
+    .reduce((sum, x) => sum + Number(x.quoteQty), 0);
+  const flowSell = comparableFlow
+    .filter(x => x.side === "sell")
+    .reduce((sum, x) => sum + Number(x.quoteQty), 0);
+  const flowTotal = flowBuy + flowSell;
+  m.buyConsensus = flowTotal > 0 ? flowBuy / flowTotal : 0;
 
   const usdt = m.exchangeData.binance;
   if (usdt) {
