@@ -103,7 +103,7 @@ function ModuleView({tab}){
  if(tab==='Risk'){
   const h=data||{};
   return <><div className="stats">
-   <Stat icon={ShieldCheck} label="Open Positions" value={(h.openPositions?.length??0)+' / 2'} detail="Paper risk limit"/>
+   <Stat icon={ShieldCheck} label="Open Positions" value={(h.paper?.openPositions??0)+' / '+(h.paper?.maxOpenPositions??2)} detail="Paper risk limit"/>
    <Stat icon={Activity} label="Feed Coverage" value={(h.feedCoveragePct??0).toFixed(1)+'%'} detail={(h.totalActiveFeeds??0)+' / '+(h.totalExpectedFeeds??0)+' active feeds'}/>
    <Stat icon={Signal} label="Market Coverage" value={(h.marketCoveragePct??0).toFixed(1)+'%'} detail={(h.marketsWith3PlusExchanges??0)+' / '+(h.marketsTracked??0)+' markets'}/>
    <Stat icon={BarChart3} label="Live Exchanges" value={(h.liveExchanges??0)+' / 10'} detail={(h.healthyExchanges??0)+' with ≥80% coverage'}/>
