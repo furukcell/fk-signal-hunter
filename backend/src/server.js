@@ -71,10 +71,19 @@ function calculateFlowFeatures(m) {
 
 function updateSignal(m) {
   prune(m);
-  const total = m.buyVolume + m.sellVolume;
+  const recentFlow = m.flow.filter(x => Number(x.quoteQty) > 0);
+  const recentBuy = recentFlow
+    .filter(x => x.side === "buy")
+    .reduce((sum, x) => sum + Number(x.quoteQty), 0);
+  const recentSell = recentFlow
+    .filter(x => x.side === "sell")
+    .reduce((sum, x) => sum + Number(x.quoteQty), 0);
+  const total = recentBuy + recentSell;
+  m.buyVolume = recentBuy;
+  m.sellVolume = recentSell;
   m.flowVolume = total;
   calculateFlowFeatures(m);
-  m.buyPressurePct = total > 0 ? (m.buyVolume / total) * 100 : null;
+  m.buyPressurePct = total > 0 ? (recentBuy / total) * 100 : null;
 
   const bidDepth = m.bids.reduce((s, x) => s + x.qty, 0);
   const askDepth = m.asks.reduce((s, x) => s + x.qty, 0);
