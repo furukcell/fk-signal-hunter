@@ -626,7 +626,7 @@ async function readBody(req) {
   return text ? JSON.parse(text) : {};
 }
 
-function handleRoute(req, res) {
+async function handleRoute(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
 
