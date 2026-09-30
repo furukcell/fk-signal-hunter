@@ -177,6 +177,8 @@ class CrossExchangeHub {
     const prev = this.latest.get(key) || {};
     const next = { ...prev, ...event, updatedAt: Date.now() };
     this.latest.set(key, next);
+    const metrics = this.ensureMetrics(event.exchange);
+    metrics.lastDataAt = Date.now();
     this.onEvent(next);
   }
 
@@ -196,7 +198,6 @@ class CrossExchangeHub {
   recordMessage(exchange) {
     const metrics = this.ensureMetrics(exchange);
     metrics.messageCount += 1;
-    metrics.lastDataAt = Date.now();
   }
 
   recordReconnect(exchange) {
@@ -273,7 +274,7 @@ class CrossExchangeHub {
     });
     ws.on("close", () => {
       if (heartbeat) clearInterval(heartbeat);
-      this.recordReconnect(statusName);
+      if (!this.stopping) this.recordReconnect(statusName);
       this.mark(statusName, "offline");
       this.connections.delete(connectionKey);
       if (!this.stopping) {
