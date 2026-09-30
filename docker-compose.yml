@@ -1,4 +1,14 @@
 services:
+  backend:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    ports:
+      - "3001:3001"
+    command: sh -c "npm install && npm start"
+    restart: unless-stopped
+
   dashboard:
     image: node:20-alpine
     working_dir: /app
@@ -6,4 +16,6 @@ services:
       - ./frontend:/app
     ports:
       - "5173:5173"
+    depends_on:
+      - backend
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
