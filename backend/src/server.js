@@ -5,6 +5,8 @@ const PORT = Number(process.env.PORT || 3001);
 const API = "https://api.binance.com";
 const QUOTE = "USDT";
 const MAX_COINS = 100;
+const DEPTH_COINS = 20;
+const DEPTH_LEVELS = 20;
 const FLOW_WINDOW_MS = 60_000;
 const REFRESH_UNIVERSE_MS = 5 * 60_000;
 
@@ -118,10 +120,12 @@ function connectStreams() {
 
   if (!universe.length) return;
 
-  const streams = universe.flatMap(x => [
-    `${x.symbol.toLowerCase()}@bookTicker`,
-    `${x.symbol.toLowerCase()}@trade`
-  ]).join("/");
+  const depthSymbols = new Set(universe.slice(0, DEPTH_COINS).map(x => x.symbol));
+  const streams = universe.flatMap(x => {
+    const base = [`${x.symbol.toLowerCase()}@bookTicker`, `${x.symbol.toLowerCase()}@trade`];
+    if (depthSymbols.has(x.symbol)) base.push(`${x.symbol.toLowerCase()}@depth20@100ms`);
+    return base;
+  }).join("/");
 
   socket = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
 
@@ -142,6 +146,11 @@ function connectStreams() {
         m.ask = Number(data.a);
         m.last = m.last ?? Number(data.a);
         m.spreadPct = m.bid > 0 ? ((m.ask - m.bid) / m.bid) * 100 : null;
+      }
+
+      if (data.e === "depthUpdate") {
+        m.bids = (data.b || []).slice(0, DEPTH_LEVELS).map(([price, qty]) => ({price:Number(price), qty:Number(qty)}));
+        m.asks = (data.a || []).slice(0, DEPTH_LEVELS).map(([price, qty]) => ({price:Number(price), qty:Number(qty)}));
       }
 
       if (data.e === "trade") {
