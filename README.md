@@ -547,72 +547,87 @@ gösterirse geçecektir.
 # 🚀 Development Roadmap
 
 ## Phase 1 — Foundation
-
-* [ ] Repository setup
-* [ ] Backend
-* [ ] Frontend
-* [ ] Database
-* [ ] Environment configuration
-* [ ] Authentication
-* [ ] Dashboard skeleton
+- [x] Repository setup
+- [x] Backend API
+- [x] Frontend dashboard
+- [x] Environment configuration
+- [x] Paper-trading dashboard
 
 ## Phase 2 — Market Data
-
-* [ ] Exchange WebSocket
-* [ ] BTC/USDT price
-* [ ] Bid/Ask
-* [ ] Order Book
-* [ ] Trades
-* [ ] Volume
-* [ ] Spread
-* [ ] Liquidity
+- [x] Multi-exchange WebSocket hub
+- [x] Top-100 market universe
+- [x] Bid/Ask
+- [x] Order Book
+- [x] Executed Trades
+- [x] Buy/Sell Flow
+- [x] Volume anomaly
+- [x] Spread
+- [x] Exchange feed health
+- [x] Automatic reconnect / heartbeat handling
 
 ## Phase 3 — Signal Engine
+- [x] Buy/Sell pressure
+- [x] Volume anomaly
+- [x] Order-book imbalance
+- [x] Large liquidity detection
+- [x] Order persistence / pull / replenishment
+- [x] Trade flow
+- [x] Short-term momentum
+- [x] Absorption detection
+- [x] Cross-exchange confirmation
+- [x] Signal Score
+- [x] Fee-aware opportunity estimation
 
-* [ ] Buy/Sell pressure
-* [ ] Volume anomaly
-* [ ] Order-book imbalance
-* [ ] Trade flow
-* [ ] Order persistence
-* [ ] Momentum
-* [ ] Signal Score
-
-## Phase 4 — Cost Engine
-
-* [ ] Maker fee
-* [ ] Taker fee
-* [ ] Spread
-* [ ] Slippage
-* [ ] Effective trading cost
-* [ ] Net profit calculation
+## Phase 4 — Cost & Execution Model
+- [x] Exchange fee profiles
+- [x] Spread-aware entry/exit
+- [x] Slippage model
+- [x] Order-book depth fills
+- [x] Net P&L accounting
+- [x] Entry/exit fee accounting
 
 ## Phase 5 — Paper Trading
+- [x] Virtual wallet
+- [x] Virtual positions
+- [x] TP/SL
+- [x] Position limits
+- [x] Daily loss limit
+- [x] Cooldown
+- [x] Trade history
+- [x] P&L
+- [x] Drawdown tracking
+- [x] Signal → Entry metrics
 
-* [ ] Virtual wallet
-* [ ] Virtual orders
-* [ ] TP/SL
-* [ ] Position management
-* [ ] Trade history
-* [ ] P&L
+## Phase 6 — Historical Validation
+- [x] Historical data collector
+- [x] Historical data loader
+- [x] Backtesting engine
+- [x] Walk-forward testing
+- [x] Out-of-sample metrics
+- [ ] Collect enough live paper-trading history
+- [ ] Validate strategy on 500–1000+ paper trades
 
-## Phase 6 — Analytics
+## Phase 7 — Dashboard
+- [x] Live market dashboard
+- [x] Signal radar
+- [x] Paper trade history
+- [x] Performance metrics
+- [x] Risk / feed-health dashboard
+- [x] Walk-forward results
+- [x] Live signal diagnostics
+- [x] Frontend build validation in CI
+- [ ] Equity curve visualization
+- [ ] Extended signal / coin analytics
 
-* [ ] Performance dashboard
-* [ ] Equity curve
-* [ ] Drawdown
-* [ ] Profit factor
-* [ ] Expectancy
-* [ ] Signal analysis
+## Phase 8 — Optional Live Trading
+- [ ] Exchange API credentials
+- [ ] Real order execution
+- [ ] Position protection
+- [ ] Emergency stop
+- [ ] Notifications
+- [ ] Small controlled live-money validation
 
-## Phase 7 — Live Trading
-
-* [ ] Exchange API integration
-* [ ] Order execution
-* [ ] Position protection
-* [ ] Emergency stop
-* [ ] Telegram alerts
-
----
+**Current state:** The paper-trading system and dashboard are implemented. The next milestone is live-data verification and accumulating statistically meaningful paper-trading results. Real-money trading is deliberately disabled.
 
 # ⚡ Core Principle
 
@@ -650,4 +665,4 @@ Gerçek para ile işlem yapılmadan önce kapsamlı backtest ve paper trading ya
 
 Personal Market Intelligence & Automated Trading System.
 
-**Status:** 🚧 Under Development
+**Status:** 🧪 Paper Trading / Validation
