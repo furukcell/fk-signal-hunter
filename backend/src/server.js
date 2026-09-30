@@ -484,3 +484,238 @@ function handleExchangeEvent(event) {
   }
 }
 
+\n\nasync function loadUniverse() {
+  const [infoRes, tickerRes, cgRes] = await Promise.all([
+    fetch(`${API}/api/v3/exchangeInfo`),
+    fetch(`${API}/api/v3/ticker/24hr`),
+    fetch(`${CG_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false&locale=en`, {
+      headers: COINGECKO_API_KEY ? { "x-cg-demo-api-key": COINGECKO_API_KEY } : {}
+    })
+  ]);
+
+  if (!infoRes.ok || !tickerRes.ok) throw new Error("Binance market discovery failed");
+  if (!cgRes.ok) throw new Error("CoinGecko market-cap discovery failed");
+
+  const info = await infoRes.json();
+  const tickers = await tickerRes.json();
+  const cgCoins = await cgRes.json();
+
+  const allowed = new Map(
+    info.symbols
+      .filter(s => s.status === "TRADING" && s.quoteAsset === QUOTE && s.isSpotTradingAllowed)
+      .map(s => [s.symbol, s])
+  );
+
+  const tickerMap = new Map(tickers.map(t => [t.symbol, t]));
+  const stableSymbols = new Set(["USDT", "USDC", "FDUSD", "TUSD", "DAI", "USDE", "USDS", "USDD", "PYUSD"]);
+  const candidates = [];
+
+  for (const coin of cgCoins) {
+    const symbol = String(coin.symbol || "").toUpperCase();
+    if (!symbol || stableSymbols.has(symbol)) continue;
+
+    const binanceSymbol = symbol + QUOTE;
+    if (!allowed.has(binanceSymbol)) continue;
+
+    const ticker = tickerMap.get(binanceSymbol);
+    if (!ticker || Number(ticker.quoteVolume) <= 0) continue;
+
+    candidates.push({
+      rank: candidates.length + 1,
+      marketCapRank: Number(coin.market_cap_rank || 0),
+      symbol: binanceSymbol,
+      baseAsset: symbol,
+      marketCapUsd: Number(coin.market_cap || 0),
+      volume24h: Number(ticker.volume || 0),
+      quoteVolume24h: Number(ticker.quoteVolume || 0),
+      priceChangePct24h: Number(ticker.priceChangePercent || 0)
+    });
+
+    if (candidates.length >= MAX_COINS) break;
+  }
+
+  universe = candidates;
+
+  for (const item of universe) {
+    const m = markets.get(item.symbol) || emptyMarket(item.symbol);
+    Object.assign(m, item);
+    markets.set(item.symbol, m);
+  }
+
+  for (const [symbol, m] of markets) {
+    if (!universe.some(x => x.symbol === symbol)) markets.delete(symbol);
+  }
+
+  const bases = universe.map(x => x.baseAsset);
+  if (!hub) {
+    hub = new CrossExchangeHub({ bases, onEvent: handleExchangeEvent });
+    hub.start();
+  } else {
+    hub.setBases(bases);
+  }
+}
+
+function marketScanner() {
+  return universe.map(item => {
+    const m = markets.get(item.symbol) || emptyMarket(item.symbol);
+    return {
+      ...m,
+      symbol: item.symbol,
+      baseAsset: item.baseAsset,
+      quoteAsset: QUOTE,
+      marketCapRank: item.marketCapRank,
+      marketCapUsd: item.marketCapUsd,
+      volume24h: item.volume24h,
+      quoteVolume24h: item.quoteVolume24h,
+      priceChangePct24h: item.priceChangePct24h,
+      exchangeCoverage: EXCHANGE_NAMES.filter(exchange => Boolean(m.exchangeData?.[exchange])).length
+    };
+  });
+}
+
+function json(res, status, value) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*"
+  });
+  res.end(JSON.stringify(value));
+}
+
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const text = Buffer.concat(chunks).toString("utf8");
+  return text ? JSON.parse(text) : {};
+}
+
+function handleRoute(req, res) {
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const pathname = url.pathname;
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type"
+    });
+    return res.end();
+  }
+
+  if (req.method === "GET" && pathname === "/health") {
+    return json(res, 200, {
+      ok: true,
+      universe: universe.length,
+      exchanges: EXCHANGE_NAMES,
+      historical: historical.snapshot()
+    });
+  }
+
+  if (req.method === "GET" && pathname === "/api/market/scanner") {
+    return json(res, 200, { universe, markets: marketScanner() });
+  }
+
+  if (req.method === "GET" && pathname === "/api/market/exchanges") {
+    return json(res, 200, hub?.getStatus?.() || {});
+  }
+
+  if (req.method === "GET" && pathname === "/api/market/btcusdt") {
+    const m = markets.get("BTCUSDT") || emptyMarket("BTCUSDT");
+    return json(res, 200, m);
+  }
+
+  if (req.method === "POST" && pathname === "/api/market/reset-flow") {
+    for (const m of markets.values()) {
+      m.flow = [];
+      m.priceHistory = [];
+      m.bookSnapshots = [];
+      m.buyVolume = 0;
+      m.sellVolume = 0;
+      m.flowVolume = 0;
+      m.buyPressurePct = null;
+      m.volumeRate1m = 0;
+      m.volumeRateBaseline = 0;
+      m.volumeAnomaly = 0;
+      m.momentumPct1m = null;
+    }
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === "GET" && pathname === "/api/signals") {
+    return json(res, 200, marketScanner()
+      .filter(m => m.score >= 70)
+      .sort((a, b) => Number(b.score) - Number(a.score))
+      .slice(0, 50));
+  }
+
+  if (req.method === "GET" && pathname === "/api/paper") {
+    return json(res, 200, paper.snapshot());
+  }
+
+  if (req.method === "POST" && pathname === "/api/paper/reset") {
+    for (const position of paper.positions.values()) {
+      // Reset is an explicit paper-only reset; open positions are discarded.
+      void position;
+    }
+    paper.positions.clear();
+    paper.trades = [];
+    paper.balance = paper.initialBalance;
+    paper.dayStartBalance = paper.balance;
+    return json(res, 200, paper.snapshot());
+  }
+
+  if (req.method === "POST" && pathname === "/api/backtest") {
+    return readBody(req)
+      .then(body => json(res, 200, runBacktest(body.rows || [], body.options || {})))
+      .catch(error => json(res, 400, { error: error.message || "Invalid request" }));
+  }
+
+  return json(res, 404, { error: "Not found" });
+}
+
+const apiServer = http.createServer((req, res) => {
+  Promise.resolve(handleRoute(req, res)).catch(error => {
+    json(res, 500, { error: error.message || "Internal server error" });
+  });
+});
+
+historical.start(markets);
+
+async function boot() {
+  try {
+    await loadUniverse();
+    universeTimer = setInterval(() => {
+      loadUniverse().catch(error => console.error("Universe refresh failed:", error.message));
+    }, REFRESH_UNIVERSE_MS);
+
+    apiServer.listen(PORT, () => {
+      console.log(`FK Signal Hunter API listening on :${PORT}`);
+      console.log(`Tracking up to ${universe.length} assets across ${EXCHANGE_NAMES.length} exchanges`);
+    });
+  } catch (error) {
+    console.error("FK Signal Hunter startup failed:", error);
+    apiServer.listen(PORT, () => {
+      console.log(`FK Signal Hunter API listening on :${PORT} (market discovery pending)`);
+    });
+    loadUniverse().catch(err => console.error("Initial universe retry failed:", err.message));
+    universeTimer = setInterval(() => {
+      loadUniverse().catch(err => console.error("Universe refresh failed:", err.message));
+    }, REFRESH_UNIVERSE_MS);
+  }
+}
+
+process.on("SIGINT", () => {
+  if (universeTimer) clearInterval(universeTimer);
+  historical.stop();
+  hub?.stop();
+  apiServer.close(() => process.exit(0));
+});
+
+process.on("SIGTERM", () => {
+  if (universeTimer) clearInterval(universeTimer);
+  historical.stop();
+  hub?.stop();
+  apiServer.close(() => process.exit(0));
+});
+
+boot();\n
