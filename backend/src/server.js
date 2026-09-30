@@ -35,7 +35,9 @@ function emptyMarket(symbol) {
     score: 50, signal: "WAIT", reasons: [],
     volume24h: 0, quoteVolume24h: 0, priceChangePct24h: 0,
     exchangeCount: 0, buyConsensus: 0, priceDispersionPct: null,
-    exchangeData: {}, flow: [], priceHistory: [], updatedAt: null
+    exchangeData: {}, flow: [], priceHistory: [], bookSnapshots: [],
+    persistencePct: null, bidPersistencePct: null, askPersistencePct: null,
+    bookPullRatio: 0, bookReplenishmentRatio: 0, updatedAt: null
   };
 }
 
@@ -131,6 +133,71 @@ function calculateBookFeatures(m) {
   m.largeAskRatio = totalNotional > 0 ? largeAskNotional / totalNotional : 0;
 }
 
+function calculateBookPersistence(m) {
+  const snapshots = m.bookSnapshots || [];
+  if (snapshots.length < 2) {
+    m.persistencePct = null;
+    m.bidPersistencePct = null;
+    m.askPersistencePct = null;
+    m.bookPullRatio = 0;
+    m.bookReplenishmentRatio = 0;
+    return;
+  }
+
+  const now = Date.now();
+  const recent = snapshots.filter(x => now - x.time <= FLOW_WINDOW_MS);
+  if (recent.length < 2) return;
+
+  const compare = (side, thresholdPct = 0.15) => {
+    let comparable = 0;
+    let persistent = 0;
+    let pulls = 0;
+    let replenishments = 0;
+
+    for (let i = 1; i < recent.length; i++) {
+      const previous = recent[i - 1][side];
+      const current = recent[i][side];
+      if (!previous.length || !current.length) continue;
+
+      const prevMap = new Map(previous.map(x => [Number(x.price), Number(x.qty)]));
+      const currMap = new Map(current.map(x => [Number(x.price), Number(x.qty)]));
+
+      for (const [price, prevQty] of prevMap) {
+        const currQty = currMap.get(price) || 0;
+        const change = prevQty > 0 ? (currQty - prevQty) / prevQty : 0;
+        if (Math.abs(change) <= thresholdPct) persistent++;
+        else if (change < -thresholdPct) pulls++;
+        comparable++;
+      }
+
+      for (const [price, currQty] of currMap) {
+        const prevQty = prevMap.get(price) || 0;
+        if (prevQty > 0 && currQty > prevQty * (1 + thresholdPct)) replenishments++;
+      }
+    }
+
+    return {
+      persistence: comparable ? persistent / comparable : 0,
+      pulls,
+      replenishments
+    };
+  };
+
+  const bid = compare("bids");
+  const ask = compare("asks");
+  const totalComparable = bid.pulls + ask.pulls + bid.replenishments + ask.replenishments;
+
+  m.bidPersistencePct = bid.persistence * 100;
+  m.askPersistencePct = ask.persistence * 100;
+  m.persistencePct = ((bid.persistence + ask.persistence) / 2) * 100;
+  m.bookPullRatio = totalComparable
+    ? (bid.pulls + ask.pulls) / totalComparable
+    : 0;
+  m.bookReplenishmentRatio = totalComparable
+    ? (bid.replenishments + ask.replenishments) / totalComparable
+    : 0;
+}
+
 function updateSignal(m) {
   prune(m);
   const recentFlow = m.flow.filter(x => Number(x.quoteQty) > 0);
@@ -148,6 +215,7 @@ function updateSignal(m) {
   m.buyPressurePct = total > 0 ? (recentBuy / total) * 100 : null;
 
   calculateBookFeatures(m);
+  calculateBookPersistence(m);
 
   let score = 50;
   const reasons = [];
@@ -172,6 +240,26 @@ function updateSignal(m) {
   } else if (m.largeAskRatio >= 0.08 && m.largeAskRatio > m.largeBidRatio) {
     score -= 4;
     reasons.push("Large ask liquidity");
+  }
+
+  if (m.bidPersistencePct != null && m.askPersistencePct != null) {
+    if (m.bidPersistencePct >= 65 && m.bidPersistencePct > m.askPersistencePct + 10) {
+      score += 6;
+      reasons.push("Persistent bid liquidity");
+    } else if (m.askPersistencePct >= 65 && m.askPersistencePct > m.bidPersistencePct + 10) {
+      score -= 6;
+      reasons.push("Persistent ask liquidity");
+    }
+
+    if (m.bookPullRatio >= 0.45) {
+      score -= 5;
+      reasons.push("High order-book pull activity");
+    }
+
+    if (m.bookReplenishmentRatio >= 0.20 && m.bidPersistencePct > m.askPersistencePct) {
+      score += 3;
+      reasons.push("Bid replenishment");
+    }
   }
 
   if (m.spreadPct != null) {
@@ -225,6 +313,17 @@ function handleExchangeEvent(event) {
     if (event.spreadPct != null) m.spreadPct = event.spreadPct;
     if (event.bids?.length) m.bids = event.bids;
     if (event.asks?.length) m.asks = event.asks;
+    if (event.bids?.length || event.asks?.length) {
+      m.bookSnapshots.push({
+        time: Number(event.ts) || Date.now(),
+        bids: event.bids?.slice(0, 20) || m.bids.slice(0, 20),
+        asks: event.asks?.slice(0, 20) || m.asks.slice(0, 20)
+      });
+      const cutoff = Date.now() - FLOW_WINDOW_MS;
+      while (m.bookSnapshots.length && m.bookSnapshots[0].time < cutoff) {
+        m.bookSnapshots.shift();
+      }
+    }
   } else if (event.source === "trade") {
     m.last = event.price ?? m.last;
     m.lastTradeAt = event.ts;
