@@ -12,6 +12,8 @@ const COINGECKO_API_KEY = process.env.COINGECKO_API_KEY || "";
 const QUOTE = "USDT";
 const MAX_COINS = 100;
 const FLOW_WINDOW_MS = 60_000;
+const MOMENTUM_WINDOW_MS = 60_000;
+const VOLUME_BASELINE_WINDOW_MS = 5 * 60_000;
 const REFRESH_UNIVERSE_MS = 5 * 60_000;
 
 const markets = new Map();
@@ -28,22 +30,50 @@ function emptyMarket(symbol) {
     buyVolume: 0, sellVolume: 0, trades: 0, flowVolume: 0,
     buyPressurePct: null, lastTradeAt: null,
     bids: [], asks: [], imbalancePct: null,
+    momentumPct1m: null, volumeRate1m: 0, volumeRateBaseline: 0, volumeAnomaly: 0,
     score: 50, signal: "WAIT", reasons: [],
     volume24h: 0, quoteVolume24h: 0, priceChangePct24h: 0,
     exchangeCount: 0, buyConsensus: 0, priceDispersionPct: null,
-    exchangeData: {}, flow: [], updatedAt: null
+    exchangeData: {}, flow: [], priceHistory: [], updatedAt: null
   };
 }
 
 function prune(m) {
-  const cutoff = Date.now() - FLOW_WINDOW_MS;
+  const cutoff = Date.now() - VOLUME_BASELINE_WINDOW_MS;
   while (m.flow?.length && m.flow[0].time < cutoff) m.flow.shift();
+}
+
+function calculateFlowFeatures(m) {
+  const now = Date.now();
+  const recentCutoff = now - FLOW_WINDOW_MS;
+  const momentumCutoff = now - MOMENTUM_WINDOW_MS;
+
+  const recent = m.flow.filter(x => x.time >= recentCutoff && Number(x.quoteQty) > 0);
+  const baseline = m.flow.filter(x => x.time < recentCutoff && x.time >= now - VOLUME_BASELINE_WINDOW_MS);
+  const recentVolume = recent.reduce((sum, x) => sum + Number(x.quoteQty), 0);
+  const baselineVolume = baseline.reduce((sum, x) => sum + Number(x.quoteQty), 0);
+
+  m.volumeRate1m = recentVolume;
+  m.volumeRateBaseline = baselineVolume / 4;
+  m.volumeAnomaly = m.volumeRateBaseline > 0
+    ? recentVolume / m.volumeRateBaseline
+    : recentVolume > 0 ? 1 : 0;
+
+  const recentPrices = m.priceHistory.filter(x => x.time >= momentumCutoff && Number(x.price) > 0);
+  if (recentPrices.length >= 2) {
+    const first = recentPrices[0].price;
+    const last = recentPrices[recentPrices.length - 1].price;
+    m.momentumPct1m = first > 0 ? ((last - first) / first) * 100 : null;
+  } else {
+    m.momentumPct1m = null;
+  }
 }
 
 function updateSignal(m) {
   prune(m);
   const total = m.buyVolume + m.sellVolume;
   m.flowVolume = total;
+  calculateFlowFeatures(m);
   m.buyPressurePct = total > 0 ? (m.buyVolume / total) * 100 : null;
 
   const bidDepth = m.bids.reduce((s, x) => s + x.qty, 0);
@@ -85,6 +115,16 @@ function updateSignal(m) {
   if (m.priceDispersionPct != null && m.priceDispersionPct <= 0.15) score += 2;
   if (m.priceDispersionPct != null && m.priceDispersionPct >= 1) score -= 4;
 
+  if (m.volumeAnomaly >= 2.5) { score += 10; reasons.push("High 1m volume anomaly"); }
+  else if (m.volumeAnomaly >= 1.5) { score += 5; reasons.push("Elevated 1m volume"); }
+
+  if (m.momentumPct1m != null) {
+    if (m.momentumPct1m >= 0.35) { score += 8; reasons.push("Positive 1m momentum"); }
+    else if (m.momentumPct1m >= 0.15) score += 4;
+    else if (m.momentumPct1m <= -0.35) { score -= 8; reasons.push("Negative 1m momentum"); }
+    else if (m.momentumPct1m <= -0.15) score -= 4;
+  }
+
   m.score = Math.max(0, Math.min(100, Math.round(score)));
   m.reasons = reasons.slice(0, 5);
   m.signal = m.score >= 82 ? "WATCH" : m.score >= 70 ? "MONITOR" : "WAIT";
@@ -116,7 +156,12 @@ function handleExchangeEvent(event) {
     const quoteQty = Number(event.quoteQty || 0);
     if (event.side === "buy") m.buyVolume += quoteQty;
     if (event.side === "sell") m.sellVolume += quoteQty;
-    m.flow.push({ time: Date.now(), exchange: event.exchange, side: event.side, quoteQty });
+    const tradeTime = Number(event.ts) || Date.now();
+    m.flow.push({ time: tradeTime, exchange: event.exchange, side: event.side, quoteQty });
+    if (Number(event.price) > 0) {
+      m.priceHistory.push({ time: tradeTime, price: Number(event.price) });
+      if (m.priceHistory.length > 5000) m.priceHistory.splice(0, m.priceHistory.length - 5000);
+    }
   }
 
   const venues = Object.values(m.exchangeData).filter(x => x.price != null || (x.bid != null && x.ask != null));
