@@ -1,6 +1,8 @@
 import http from "node:http";
 import WebSocket from "ws";
 import { CrossExchangeHub, EXCHANGE_NAMES } from "./exchangeHub.js";
+import { PaperEngine } from "./paperEngine.js";
+import { buildOpportunity } from "./signalEngine.js";
 
 const PORT = Number(process.env.PORT || 3001);
 const API = "https://api.binance.com";
@@ -16,6 +18,7 @@ const exchangeFlows = new Map();
 let universe = [];
 let hub = null;
 let universeTimer = null;
+const paper = new PaperEngine({ initialBalance: 1000, positionPct: 0.15, tpPct: 0.02, slPct: 0.008, maxOpenPositions: 2 });
 
 function emptyMarket(symbol) {
   return {
@@ -116,7 +119,8 @@ function handleExchangeEvent(event) {
   const venues = Object.values(m.exchangeData).filter(x => x.price != null || (x.bid != null && x.ask != null));
   m.exchangeCount = venues.length;
 
-  const mids = venues.map(x => {
+  const comparable = venues.filter(x => x.quoteAsset === "USDT");
+  const mids = comparable.map(x => {
     if (x.price != null) return Number(x.price);
     if (x.bid != null && x.ask != null) return (Number(x.bid) + Number(x.ask)) / 2;
     return null;
@@ -129,7 +133,7 @@ function handleExchangeEvent(event) {
     m.priceDispersionPct = avg > 0 ? ((max - min) / avg) * 100 : null;
   }
 
-  const directional = venues.filter(x => x.side === "buy" || x.side === "sell");
+  const directional = comparable.filter(x => x.side === "buy" || x.side === "sell");
   m.buyConsensus = directional.length
     ? directional.filter(x => x.side === "buy").length / directional.length
     : 0;
@@ -143,159 +147,30 @@ function handleExchangeEvent(event) {
   }
 
   updateSignal(m);
-}
 
-async function loadUniverse() {
-  const [infoRes, tickerRes, cgRes] = await Promise.all([
-    fetch(API + "/api/v3/exchangeInfo"),
-    fetch(API + "/api/v3/ticker/24hr"),
-    fetch(CG_API + "/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false&locale=en", {
-      headers: COINGECKO_API_KEY ? { "x-cg-demo-api-key": COINGECKO_API_KEY } : {}
-    })
-  ]);
+  const opportunity = buildOpportunity(m);
+  m.opportunity = opportunity;
 
-  if (!infoRes.ok || !tickerRes.ok) throw new Error("Binance market discovery failed");
-  if (!cgRes.ok) throw new Error("CoinGecko market-cap discovery failed");
-
-  const info = await infoRes.json();
-  const tickers = await tickerRes.json();
-  const cgCoins = await cgRes.json();
-
-  const allowed = new Map(
-    info.symbols
-      .filter(s => s.status === "TRADING" && s.quoteAsset === QUOTE && s.isSpotTradingAllowed)
-      .map(s => [s.symbol, s])
-  );
-  const tickerMap = new Map(tickers.map(t => [t.symbol, t]));
-  const stable = new Set(["USDT","USDC","FDUSD","TUSD","DAI","USDE","USDS","USDD","PYUSD"]);
-
-  const candidates = [];
-  for (const coin of cgCoins) {
-    const base = String(coin.symbol || "").toUpperCase();
-    if (!base || stable.has(base)) continue;
-    const symbol = base + QUOTE;
-    if (!allowed.has(symbol)) continue;
-    const ticker = tickerMap.get(symbol);
-    if (!ticker || Number(ticker.quoteVolume) <= 0) continue;
-
-    candidates.push({
-      rank: candidates.length + 1,
-      marketCapRank: coin.market_cap_rank,
-      symbol, baseAsset: base, marketCapUsd: Number(coin.market_cap || 0),
-      volume24h: Number(ticker.volume || 0),
-      quoteVolume24h: Number(ticker.quoteVolume || 0),
-      priceChangePct24h: Number(ticker.priceChangePercent || 0)
-    });
-    if (candidates.length >= MAX_COINS) break;
+  if (event.quoteAsset === "USDT" && event.price != null) {
+    const closed = paper.update(m.symbol, Number(event.price), event.ts);
+    if (closed) m.lastPaperTrade = closed;
   }
 
-  universe = candidates;
-  const keep = new Set(universe.map(x => x.symbol));
-  for (const item of universe) {
-    const m = ensureMarket(item.baseAsset);
-    Object.assign(m, item);
-    updateSignal(m);
-  }
-  for (const symbol of markets.keys()) if (!keep.has(symbol)) markets.delete(symbol);
-
-  if (!hub) {
-    hub = new CrossExchangeHub({
-      bases: universe.map(x => x.baseAsset),
-      onEvent: handleExchangeEvent
+  if (
+    opportunity?.actionable &&
+    opportunity.buyConsensus >= 0.7 &&
+    opportunity.bestBuy &&
+    !paper.positions.has(m.symbol)
+  ) {
+    const opened = paper.open({
+      symbol: m.symbol,
+      exchange: opportunity.bestBuy.exchange,
+      price: opportunity.bestBuy.ask,
+      spreadPct: m.spreadPct || 0,
+      score: m.score,
+      timestamp: event.ts
     });
-    hub.start();
-  } else {
-    hub.setBases(universe.map(x => x.baseAsset));
+    if (opened.opened) m.lastPaperEntry = opened.position;
   }
 }
 
-function scannerRows() {
-  return [...markets.values()]
-    .map(m => {
-      updateSignal(m);
-      return {
-        ...m,
-        exchangeData: Object.fromEntries(Object.entries(m.exchangeData).map(([k,v]) => [k, {
-          price: v.price ?? null, bid: v.bid ?? null, ask: v.ask ?? null,
-          side: v.side ?? null, updatedAt: v.updatedAt ?? null
-        }]))
-      };
-    })
-    .sort((a,b) => (b.score - a.score) || (b.quoteVolume24h - a.quoteVolume24h));
-}
-
-function json(res, status, data) {
-  const body = JSON.stringify(data);
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-    "Access-Control-Allow-Origin": "*"
-  });
-  res.end(body);
-}
-
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, "http://localhost:" + PORT);
-
-  if (req.method === "GET" && url.pathname === "/health") {
-    return json(res, 200, {
-      ok: true, service: "fk-signal-hunter-backend",
-      exchanges: hub?.getStatus() || Object.fromEntries(EXCHANGE_NAMES.map(x => [x, "starting"])),
-      universeSize: universe.length,
-      timestamp: Date.now()
-    });
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/market/scanner") {
-    return json(res, 200, {
-      markets: scannerRows(),
-      exchanges: hub?.getStatus() || {},
-      exchangeCount: EXCHANGE_NAMES.length,
-      universeSize: universe.length,
-      updatedAt: Date.now()
-    });
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/market/exchanges") {
-    return json(res, 200, {
-      exchanges: EXCHANGE_NAMES,
-      status: hub?.getStatus() || {},
-      markets: hub?.snapshot() || []
-    });
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/market/btcusdt") {
-    return json(res, 200, markets.get("BTCUSDT") || emptyMarket("BTCUSDT"));
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/market/reset-flow") {
-    for (const m of markets.values()) {
-      m.buyVolume = 0; m.sellVolume = 0; m.trades = 0; m.flow = [];
-      updateSignal(m);
-    }
-    return json(res, 200, { ok: true });
-  }
-
-  json(res, 404, { error: "Not found" });
-});
-
-async function boot() {
-  try {
-    await loadUniverse();
-    universeTimer = setInterval(() => loadUniverse().catch(err => console.error("[universe]", err.message)), REFRESH_UNIVERSE_MS);
-  } catch (error) {
-    console.error("[boot]", error.message);
-    universeTimer = setInterval(() => loadUniverse().catch(err => console.error("[universe]", err.message)), 15000);
-  }
-}
-
-server.listen(PORT, () => {
-  console.log("FK Signal Hunter backend listening on http://localhost:" + PORT);
-  boot();
-});
-
-process.on("SIGINT", () => {
-  clearInterval(universeTimer);
-  hub?.stop();
-  server.close(() => process.exit(0));
-});
