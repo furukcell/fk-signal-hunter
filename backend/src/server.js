@@ -342,8 +342,12 @@ function updateSignal(m) {
   if (m.quoteVolume24h >= 100_000_000) score += 5;
   else if (m.quoteVolume24h >= 25_000_000) score += 3;
 
-  if (m.exchangeCount >= 6) { score += 4; reasons.push("Multi-exchange confirmation"); }
-  else if (m.exchangeCount >= 3) { score += 2; }
+  if (m.activeExchangeCount >= 6) { score += 4; reasons.push("Multi-exchange confirmation"); }
+  else if (m.activeExchangeCount >= 3) { score += 2; }
+  else {
+    score -= 8;
+    reasons.push("Insufficient fresh exchange coverage");
+  }
 
   if (m.buyConsensus >= 0.7) { score += 6; reasons.push("Cross-exchange buy consensus"); }
   else if (m.buyConsensus <= 0.3) { score -= 6; reasons.push("Cross-exchange sell consensus"); }
@@ -360,6 +364,8 @@ function updateSignal(m) {
     else if (m.momentumPct1m <= -0.35) { score -= 8; reasons.push("Negative 1m momentum"); }
     else if (m.momentumPct1m <= -0.15) score -= 4;
   }
+
+  if (m.activeExchangeCount < 3) score = Math.min(score, 69);
 
   m.score = Math.max(0, Math.min(100, Math.round(score)));
   m.reasons = reasons.slice(0, 5);
