@@ -193,9 +193,9 @@ class CrossExchangeHub {
     }
   }
 
-  attach(exchange, ws, onMessage, heartbeatMs = 0) {
-    this.connections.set(exchange, ws);
-    this.mark(exchange, "connecting");
+  attach(connectionKey, ws, onMessage, heartbeatMs = 0, statusName = connectionKey.split("-")[0]) {
+    this.connections.set(connectionKey, ws);
+    this.mark(statusName, "connecting");
     let heartbeat;
     ws.on("open", () => {
       this.mark(statusName, "live");
