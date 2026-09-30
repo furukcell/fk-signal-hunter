@@ -123,6 +123,7 @@ class CrossExchangeHub {
     this.connections = new Map();
     this.latest = new Map();
     this.status = new Map();
+    this.stopping = true;
   }
 
   key(exchange, base) {
@@ -135,11 +136,12 @@ class CrossExchangeHub {
   }
 
   start() {
-    this.stop();
+    this.stopping = false;
     for (const exchange of EXCHANGE_NAMES) this.connectExchange(exchange);
   }
 
   stop() {
+    this.stopping = true;
     for (const ws of this.connections.values()) {
       try { ws.close(); } catch {}
     }
@@ -210,17 +212,18 @@ class CrossExchangeHub {
   }
 
   async connectExchange(exchange) {
+    if (this.stopping) return;
     try {
       const fn = this["connect_" + exchange];
       if (!fn) throw new Error("adapter missing");
       await fn.call(this);
     } catch (error) {
       this.mark(exchange, "error");
-      setTimeout(() => this.connectExchange(exchange), 5000);
+      if (!this.stopping) setTimeout(() => this.connectExchange(exchange), 5000);
     }
   }
 
-  attach(connectionKey, ws, onMessage, heartbeatMs = 0, statusName = connectionKey.split("-")[0]) {
+  attach(connectionKey, ws, onMessage, heartbeatMs = 0, statusName = connectionKey.split("-")[0], reconnect = null) {
     this.connections.set(connectionKey, ws);
     this.mark(statusName, "connecting");
     let heartbeat;
@@ -237,7 +240,13 @@ class CrossExchangeHub {
       if (heartbeat) clearInterval(heartbeat);
       this.mark(statusName, "offline");
       this.connections.delete(connectionKey);
-      setTimeout(() => this.connectExchange(statusName), 3000);
+      if (!this.stopping) {
+        setTimeout(() => {
+          if (this.stopping) return;
+          if (typeof reconnect === "function") reconnect();
+          else this.connectExchange(statusName);
+        }, 3000);
+      }
     });
     ws.on("error", () => this.mark(statusName, "error"));
   }
@@ -251,68 +260,47 @@ class CrossExchangeHub {
     }
     for (let i = 0; i < streams.length; i += 160) {
       const chunk = streams.slice(i, i + 160);
-      const ws = new WebSocket("wss://stream.binance.com:443/stream?streams=" + chunk.join("/"));
-      this.attach("binance", ws, data => {
-        const msg = JSON.parse(data.toString()).data;
-        if (!msg) return;
-        const symbol = String(msg.s || "");
-        const base = symbol.endsWith("USDT") ? symbol.slice(0, -4) : "";
-        if (!base) return;
-        if (msg.e === "trade") {
-          this.emit(normalize({
-            exchange: "binance", symbol, baseAsset: base, quoteAsset: "USDT",
-            price: msg.p, qty: msg.q, side: msg.m ? "sell" : "buy", ts: msg.T
-          }));
-        } else if (msg.e === "bookTicker") {
-          this.emit(normalize({
-            exchange: "binance", symbol, baseAsset: base, quoteAsset: "USDT",
-            price: msg.b, bid: msg.b, ask: msg.a, ts: msg.E, source: "book"
-          }));
-        } else if (msg.e === "depthUpdate") {
-          this.emit(normalize({
-            exchange: "binance", symbol, baseAsset: base, quoteAsset: "USDT",
-            price: msg.bids?.[0]?.[0], bid: msg.bids?.[0]?.[0], ask: msg.asks?.[0]?.[0],
-            bids: (msg.bids || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),
-            asks: (msg.asks || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),
-            ts: msg.E, source: "book"
-          }));
-        }
-      });
+      const openChunk = () => {
+        if (this.stopping) return;
+        const ws = new WebSocket("wss://stream.binance.com:443/stream?streams=" + chunk.join("/"));
+        this.attach("binance-" + i, ws, data => {
+          const msg = JSON.parse(data.toString()).data;
+          if (!msg) return;
+          const symbol = String(msg.s || "");
+          const base = symbol.endsWith("USDT") ? symbol.slice(0, -4) : "";
+          if (!base) return;
+          if (msg.e === "trade") this.emit(normalize({ exchange:"binance",symbol,baseAsset:base,quoteAsset:"USDT",price:msg.p,qty:msg.q,side:msg.m?"sell":"buy",ts:msg.T }));
+          else if (msg.e === "bookTicker") this.emit(normalize({ exchange:"binance",symbol,baseAsset:base,quoteAsset:"USDT",price:msg.b,bid:msg.b,ask:msg.a,ts:msg.E,source:"book" }));
+          else if (msg.e === "depthUpdate") this.emit(normalize({ exchange:"binance",symbol,baseAsset:base,quoteAsset:"USDT",price:msg.bids?.[0]?.[0],bid:msg.bids?.[0]?.[0],ask:msg.asks?.[0]?.[0],bids:(msg.bids||[]).map(x=>({price:Number(x[0]),qty:Number(x[1])})),asks:(msg.asks||[]).map(x=>({price:Number(x[0]),qty:Number(x[1])})),ts:msg.E,source:"book" }));
+        }, 0, "binance", openChunk);
+      };
+      openChunk();
     }
   }
 
   async connect_okx() {
     const args = [];
     for (const base of this.bases) {
-      args.push({ channel: "trades", instId: base + "-USDT" });
-      args.push({ channel: "books5", instId: base + "-USDT" });
+      args.push({ channel:"trades", instId:base+"-USDT" });
+      args.push({ channel:"books5", instId:base+"-USDT" });
     }
-    for (let i = 0; i < args.length; i += 120) {
-      const ws = new WebSocket("wss://ws.okx.com:8443/ws/v5/public");
-      const chunk = args.slice(i, i + 120);
-      ws.on("open", () => ws.send(JSON.stringify({ op: "subscribe", args: chunk })));
-      this.attach("okx", ws, data => {
-        const msg = JSON.parse(data.toString());
-        if (!msg.data?.length) return;
-        const d = msg.data[0];
-        const instId = d.instId || "";
-        const base = instId.endsWith("-USDT") ? instId.slice(0, -5) : "";
-        if (!base) return;
-        if (msg.arg?.channel === "trades") {
-          this.emit(normalize({
-            exchange: "okx", symbol: instId, baseAsset: base, quoteAsset: "USDT",
-            price: d.px, qty: d.sz, side: d.side, ts: d.ts
-          }));
-        } else if (msg.arg?.channel === "books5") {
-          this.emit(normalize({
-            exchange: "okx", symbol: instId, baseAsset: base, quoteAsset: "USDT",
-            price: d.asks?.[0]?.[0] || d.bids?.[0]?.[0], bid: d.bids?.[0]?.[0], ask: d.asks?.[0]?.[0],
-            bids: (d.bids || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),
-            asks: (d.asks || []).map(x => ({ price: Number(x[0]), qty: Number(x[1]) })),
-            ts: d.ts, source: "book"
-          }));
-        }
-      }, 18000);
+    for (let i=0;i<args.length;i+=120) {
+      const chunk=args.slice(i,i+120);
+      const openChunk=()=>{
+        if(this.stopping)return;
+        const ws=new WebSocket("wss://ws.okx.com:8443/ws/v5/public");
+        ws.on("open",()=>ws.send(JSON.stringify({op:"subscribe",args:chunk})));
+        this.attach("okx-"+i,ws,data=>{
+          const msg=JSON.parse(data.toString());
+          if(!msg.data?.length)return;
+          const d=msg.data[0], instId=d.instId||"";
+          const base=instId.endsWith("-USDT")?instId.slice(0,-5):"";
+          if(!base)return;
+          if(msg.arg?.channel==="trades") this.emit(normalize({exchange:"okx",symbol:instId,baseAsset:base,quoteAsset:"USDT",price:d.px,qty:d.sz,side:d.side,ts:d.ts}));
+          else if(msg.arg?.channel==="books5") this.emit(normalize({exchange:"okx",symbol:instId,baseAsset:base,quoteAsset:"USDT",price:d.asks?.[0]?.[0]||d.bids?.[0]?.[0],bid:d.bids?.[0]?.[0],ask:d.asks?.[0]?.[0],bids:(d.bids||[]).map(x=>({price:Number(x[0]),qty:Number(x[1])})),asks:(d.asks||[]).map(x=>({price:Number(x[0]),qty:Number(x[1])})),ts:d.ts,source:"book"}));
+        },18000,"okx",openChunk);
+      };
+      openChunk();
     }
   }
 
@@ -347,34 +335,27 @@ class CrossExchangeHub {
   }
 
   async connect_bitget() {
-    const args = [];
-    for (const base of this.bases) {
-      args.push({ instType: "SPOT", channel: "trade", instId: base + "USDT" });
-      args.push({ instType: "SPOT", channel: "ticker", instId: base + "USDT" });
+    const args=[];
+    for(const base of this.bases){
+      args.push({instType:"SPOT",channel:"trade",instId:base+"USDT"});
+      args.push({instType:"SPOT",channel:"ticker",instId:base+"USDT"});
     }
-    for (let i = 0; i < args.length; i += 80) {
-      const ws = new WebSocket("wss://ws.bitget.com/v2/ws/public");
-      const chunk = args.slice(i, i + 80);
-      ws.on("open", () => ws.send(JSON.stringify({ op: "subscribe", args: chunk })));
-      this.attach("bitget", ws, data => {
-        const msg = JSON.parse(data.toString());
-        const arg = msg.arg || {};
-        const instId = arg.instId || "";
-        const base = instId.endsWith("USDT") ? instId.slice(0, -4) : "";
-        if (!base || !msg.data?.length) return;
-        const d = msg.data[0];
-        if (arg.channel === "trade") {
-          this.emit(normalize({
-            exchange: "bitget", symbol: instId, baseAsset: base, quoteAsset: "USDT",
-            price: d.price, qty: d.size, side: String(d.side || "").toLowerCase(), ts: d.ts
-          }));
-        } else if (arg.channel === "ticker") {
-          this.emit(normalize({
-            exchange: "bitget", symbol: instId, baseAsset: base, quoteAsset: "USDT",
-            price: d.lastPr, bid: d.bidPr, ask: d.askPr, ts: d.ts, source: "book"
-          }));
-        }
-      }, 25000);
+    for(let i=0;i<args.length;i+=80){
+      const chunk=args.slice(i,i+80);
+      const openChunk=()=>{
+        if(this.stopping)return;
+        const ws=new WebSocket("wss://ws.bitget.com/v2/ws/public");
+        ws.on("open",()=>ws.send(JSON.stringify({op:"subscribe",args:chunk})));
+        this.attach("bitget-"+i,ws,data=>{
+          const msg=JSON.parse(data.toString()), arg=msg.arg||{}, instId=arg.instId||"";
+          const base=instId.endsWith("USDT")?instId.slice(0,-4):"";
+          if(!base||!msg.data?.length)return;
+          const d=msg.data[0];
+          if(arg.channel==="trade") this.emit(normalize({exchange:"bitget",symbol:instId,baseAsset:base,quoteAsset:"USDT",price:d.price,qty:d.size,side:String(d.side||"").toLowerCase(),ts:d.ts}));
+          else if(arg.channel==="ticker") this.emit(normalize({exchange:"bitget",symbol:instId,baseAsset:base,quoteAsset:"USDT",price:d.lastPr,bid:d.bidPr,ask:d.askPr,ts:d.ts,source:"book"}));
+        },25000,"bitget",openChunk);
+      };
+      openChunk();
     }
   }
 
