@@ -55,6 +55,17 @@ export default function App(){
 
 function ModuleView({tab}){
  const [data,setData]=useState(null);
+ const [wf,setWf]=useState(null);
+ const [wfLoading,setWfLoading]=useState(false);
+ const runValidation=async()=>{
+  setWfLoading(true);
+  try{
+   const r=await fetch('/api/walk-forward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:{baseOptions:{entryDelayMs:10000,maxHoldMs:15*60*1000,cooldownMs:60*1000,slippageBps:5}}})});
+   const d=await r.json();
+   if(r.ok)setWf(d); else setWf({error:d.error||'Validation failed'});
+  }catch(e){setWf({error:e.message});}
+  finally{setWfLoading(false);}
+ };
  useEffect(()=>{
   let alive=true;
   const load=async()=>{
@@ -79,17 +90,6 @@ function ModuleView({tab}){
   const trades=data?.trades??[];
   const wins=trades.filter(t=>t.netPnl>0).length;
   const pf=(()=>{const gp=trades.filter(t=>t.netPnl>0).reduce((s,t)=>s+t.netPnl,0);const gl=Math.abs(trades.filter(t=>t.netPnl<0).reduce((s,t)=>s+t.netPnl,0));return gl?gp/gl:null})();
-  const [wf,setWf]=useState(null);
-  const [wfLoading,setWfLoading]=useState(false);
-  const runValidation=async()=>{
-   setWfLoading(true);
-   try{
-    const r=await fetch('/api/walk-forward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:{baseOptions:{entryDelayMs:10000,maxHoldMs:15*60*1000,cooldownMs:60*1000,slippageBps:5}}})});
-    const d=await r.json();
-    if(r.ok)setWf(d); else setWf({error:d.error||'Validation failed'});
-   }catch(e){setWf({error:e.message});}
-   finally{setWfLoading(false);}
-  };
   const a=wf?.result?.aggregate;
   return <><div className="stats"><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper"/><Stat icon={TrendingUp} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Since start"/><Stat icon={Target} label="Win Rate" value={trades.length?((wins/trades.length)*100).toFixed(1)+'%':'—'} detail={trades.length+' closed trades'}/><Stat icon={Gauge} label="Profit Factor" value={pf==null?'—':pf.toFixed(2)} detail="Net after modeled costs"/></div>
   <section className="card">
