@@ -11,10 +11,32 @@ function asArray(value, fallback) {
   return fallback;
 }
 
-function candidateScore(result) {
-  if (!result.trades) return Number.NEGATIVE_INFINITY;
-  const pf = result.profitFactor == null ? 0 : result.profitFactor;
-  return result.returnPct - result.maxDrawdownPct * 0.5 + Math.min(pf, 3) * 0.25;
+function lowerBound(rows, target) {
+  let lo = 0;
+  let hi = rows.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (Number(rows[mid].ts) < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function upperBound(rows, target) {
+  let lo = 0;
+  let hi = rows.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (Number(rows[mid].ts) <= target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function candidateScore(result, minTrades) {
+  if (result.trades < minTrades) return Number.NEGATIVE_INFINITY;
+  const pf = result.profitFactor == null ? 0 : Math.min(result.profitFactor, 3);
+  return result.returnPct - result.maxDrawdownPct * 0.5 + pf * 0.25;
 }
 
 function makeCandidates(grid) {
@@ -46,6 +68,7 @@ function runWalkForward(rows = [], options = {}) {
   const testMs = Number(options.testMs || 24 * 60 * 60 * 1000);
   const stepMs = Number(options.stepMs || testMs);
   const maxRowsPerWindow = Number(options.maxRowsPerWindow || 100000);
+  const minTrainingTrades = Number(options.minTrainingTrades || 10);
   const baseOptions = { ...(options.baseOptions || {}) };
   const candidates = makeCandidates(options.grid || DEFAULT_GRID);
   const windows = [];
@@ -58,15 +81,16 @@ function runWalkForward(rows = [], options = {}) {
     const trainStart = cursor - trainMs;
     const testEnd = cursor + testMs;
 
-    let train = sorted.filter(row => Number(row.ts) >= trainStart && Number(row.ts) < cursor);
-    let test = sorted.filter(row => Number(row.ts) >= cursor && Number(row.ts) < testEnd);
+    const trainStartIndex = lowerBound(sorted, trainStart);
+    const trainEndIndex = lowerBound(sorted, cursor);
+    const testStartIndex = trainEndIndex;
+    const testEndIndex = lowerBound(sorted, testEnd);
 
-    if (train.length && train.length > maxRowsPerWindow) {
-      train = train.slice(-maxRowsPerWindow);
-    }
-    if (test.length && test.length > maxRowsPerWindow) {
-      test = test.slice(0, maxRowsPerWindow);
-    }
+    let train = sorted.slice(trainStartIndex, trainEndIndex);
+    let test = sorted.slice(testStartIndex, testEndIndex);
+
+    if (train.length > maxRowsPerWindow) train = train.slice(-maxRowsPerWindow);
+    if (test.length > maxRowsPerWindow) test = test.slice(0, maxRowsPerWindow);
 
     if (!train.length || !test.length) {
       cursor += stepMs;
@@ -76,15 +100,33 @@ function runWalkForward(rows = [], options = {}) {
     let best = null;
     for (const candidate of candidates) {
       const result = runBacktest(train, { ...baseOptions, ...candidate });
-      const score = candidateScore(result);
+      const score = candidateScore(result, minTrainingTrades);
       if (!best || score > best.score) {
         best = { candidate, score, result };
       }
     }
 
+    if (!best || !Number.isFinite(best.score)) {
+      windows.push({
+        trainStart,
+        trainEnd: cursor,
+        testStart: cursor,
+        testEnd,
+        trainRows: train.length,
+        testRows: test.length,
+        selected: null,
+        inSample: null,
+        outOfSample: null,
+        skipped: true,
+        reason: "INSUFFICIENT_TRAINING_TRADES"
+      });
+      cursor += stepMs;
+      continue;
+    }
+
     const outOfSample = runBacktest(test, {
       ...baseOptions,
-      ...(best?.candidate || {})
+      ...best.candidate
     });
 
     windows.push({
@@ -94,16 +136,14 @@ function runWalkForward(rows = [], options = {}) {
       testEnd,
       trainRows: train.length,
       testRows: test.length,
-      selected: best?.candidate || null,
-      inSample: best
-        ? {
-            returnPct: best.result.returnPct,
-            netPnl: best.result.netPnl,
-            trades: best.result.trades,
-            profitFactor: best.result.profitFactor,
-            maxDrawdownPct: best.result.maxDrawdownPct
-          }
-        : null,
+      selected: best.candidate,
+      inSample: {
+        returnPct: best.result.returnPct,
+        netPnl: best.result.netPnl,
+        trades: best.result.trades,
+        profitFactor: best.result.profitFactor,
+        maxDrawdownPct: best.result.maxDrawdownPct
+      },
       outOfSample: {
         returnPct: outOfSample.returnPct,
         netPnl: outOfSample.netPnl,
@@ -117,9 +157,10 @@ function runWalkForward(rows = [], options = {}) {
     cursor += stepMs;
   }
 
-  const testReturns = windows.map(w => Number(w.outOfSample.returnPct || 0));
-  const testPnl = windows.reduce((sum, w) => sum + Number(w.outOfSample.netPnl || 0), 0);
-  const positiveWindows = windows.filter(w => Number(w.outOfSample.netPnl || 0) > 0).length;
+  const evaluated = windows.filter(w => w.outOfSample);
+  const testReturns = evaluated.map(w => Number(w.outOfSample.returnPct || 0));
+  const testPnl = evaluated.reduce((sum, w) => sum + Number(w.outOfSample.netPnl || 0), 0);
+  const positiveWindows = evaluated.filter(w => Number(w.outOfSample.netPnl || 0) > 0).length;
   const averageReturnPct = testReturns.length
     ? testReturns.reduce((sum, value) => sum + value, 0) / testReturns.length
     : 0;
@@ -128,9 +169,10 @@ function runWalkForward(rows = [], options = {}) {
     windows,
     candidates: candidates.length,
     aggregate: {
-      windows: windows.length,
+      windows: evaluated.length,
+      skippedWindows: windows.length - evaluated.length,
       positiveWindows,
-      positiveWindowRate: windows.length ? positiveWindows / windows.length : 0,
+      positiveWindowRate: evaluated.length ? positiveWindows / evaluated.length : 0,
       averageOutOfSampleReturnPct: averageReturnPct,
       totalOutOfSamplePnl: testPnl
     }
