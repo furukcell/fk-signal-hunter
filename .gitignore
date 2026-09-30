@@ -8,4 +8,6 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
-\ndata/historical/\n
+data/historical/
+firebase-service-account*.json
+service-account*.json
