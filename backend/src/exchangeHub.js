@@ -502,39 +502,40 @@ class CrossExchangeHub {
     }
     for (let i = 0; i < channels.length; i += 30) {
       const chunk = channels.slice(i, i + 30);
-      const ws = new WebSocket("wss://wbs-api.mexc.com/ws");
-      ws.on("open", () => {
-        ws.send(JSON.stringify({ method: "SUBSCRIPTION", params: chunk }));
-      });
-      this.attach("mexc-" + i, ws, data => {
-        if (typeof data === "string") {
-          try {
-            const msg = JSON.parse(data.toString());
-            if (msg.code || msg.msg || msg.type === "PONG") return;
-          } catch {}
-          return;
-        }
-        const decoded = decodeMexcWrapper(Buffer.from(data));
-        const symbol = decoded.symbol || "";
-        const base = symbol.endsWith("USDT") ? symbol.slice(0, -4) : "";
-        if (!base) return;
-        for (const deal of decoded.deals) {
-          this.emit(normalize({
-            exchange: "mexc", symbol, baseAsset: base, quoteAsset: "USDT",
-            price: deal.price, qty: deal.quantity,
-            side: deal.tradeType === 1 ? "buy" : deal.tradeType === 2 ? "sell" : null,
-            ts: deal.time
-          }));
-        }
-        if (decoded.book) {
-          this.emit(normalize({
-            exchange: "mexc", symbol, baseAsset: base, quoteAsset: "USDT",
-            price: decoded.book.bidPrice,
-            bid: decoded.book.bidPrice, ask: decoded.book.askPrice,
-            ts: decoded.sendTime, source: "book"
-          }));
-        }
-      }, 20000);
+      const openChunk = () => {
+        if (this.stopping) return;
+        const ws = new WebSocket("wss://wbs-api.mexc.com/ws");
+        ws.on("open", () => ws.send(JSON.stringify({ method: "SUBSCRIPTION", params: chunk })));
+        this.attach("mexc-" + i, ws, data => {
+          if (typeof data === "string") {
+            try {
+              const msg = JSON.parse(data.toString());
+              if (msg.code || msg.msg || msg.type === "PONG") return;
+            } catch {}
+            return;
+          }
+          const decoded = decodeMexcWrapper(Buffer.from(data));
+          const symbol = decoded.symbol || "";
+          const base = symbol.endsWith("USDT") ? symbol.slice(0, -4) : "";
+          if (!base) return;
+          for (const deal of decoded.deals) {
+            this.emit(normalize({
+              exchange: "mexc", symbol, baseAsset: base, quoteAsset: "USDT",
+              price: deal.price, qty: deal.quantity,
+              side: deal.tradeType === 1 ? "buy" : deal.tradeType === 2 ? "sell" : null,
+              ts: deal.time
+            }));
+          }
+          if (decoded.book) {
+            this.emit(normalize({
+              exchange: "mexc", symbol, baseAsset: base, quoteAsset: "USDT",
+              price: decoded.book.bidPrice, bid: decoded.book.bidPrice, ask: decoded.book.askPrice,
+              ts: decoded.sendTime, source: "book"
+            }));
+          }
+        }, 20000, "mexc", openChunk);
+      };
+      openChunk();
     }
   }
 
