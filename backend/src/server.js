@@ -505,6 +505,7 @@ function handleExchangeEvent(event) {
     });
     if (closed) {
       m.lastPaperTrade = closed;
+      signalOutcomeTracker.recordPaperTrade(closed, nowTs);
       void firebaseStore.recordPaperTrade(closed);
     }
   }
