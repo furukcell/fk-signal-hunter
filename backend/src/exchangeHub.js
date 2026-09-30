@@ -210,7 +210,7 @@ class CrossExchangeHub {
       if (heartbeat) clearInterval(heartbeat);
       this.mark(statusName, "offline");
       this.connections.delete(connectionKey);
-      setTimeout(() => this.connectExchange(exchange), 3000);
+      setTimeout(() => this.connectExchange(statusName), 3000);
     });
     ws.on("error", () => this.mark(statusName, "error"));
   }
