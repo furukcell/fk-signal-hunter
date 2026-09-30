@@ -2,54 +2,43 @@ import http from "node:http";
 import WebSocket from "ws";
 
 const PORT = Number(process.env.PORT || 3001);
-const SYMBOL = "btcusdt";
-const DEPTH_LEVELS = 20;
+const API = "https://api.binance.com";
+const QUOTE = "USDT";
+const MAX_COINS = 100;
 const FLOW_WINDOW_MS = 60_000;
+const REFRESH_UNIVERSE_MS = 5 * 60_000;
 
-const state = {
-  symbol: "BTC/USDT",
-  bid: null,
-  ask: null,
-  last: null,
-  spreadPct: null,
-  buyVolume: 0,
-  sellVolume: 0,
-  trades: 0,
-  lastTradeAt: null,
-  connected: false,
-  updatedAt: null,
-  error: null,
-  bids: [],
-  asks: [],
-  imbalancePct: null,
-  score: 0,
-  signal: "WAIT",
-  reasons: []
-};
+const markets = new Map();
+let universe = [];
+let socket = null;
+let reconnectTimer = null;
+let universeTimer = null;
 
-const flow = [];
-
-function pruneFlow(now = Date.now()) {
-  const cutoff = now - FLOW_WINDOW_MS;
-  while (flow.length && flow[0].time < cutoff) flow.shift();
+function emptyMarket(symbol) {
+  return {
+    symbol,
+    bid: null, ask: null, last: null, spreadPct: null,
+    buyVolume: 0, sellVolume: 0, trades: 0,
+    lastTradeAt: null, bids: [], asks: [],
+    imbalancePct: null, score: 50, signal: "WAIT", reasons: [],
+    volume24h: 0, quoteVolume24h: 0, priceChangePct24h: 0,
+    flow: [], updatedAt: null
+  };
 }
 
-function resetFlow() {
-  flow.length = 0;
-  state.buyVolume = 0;
-  state.sellVolume = 0;
-  state.trades = 0;
+function pruneFlow(m) {
+  const cutoff = Date.now() - FLOW_WINDOW_MS;
+  while (m.flow.length && m.flow[0].time < cutoff) m.flow.shift();
 }
 
-function updateSignal() {
-  const total = state.buyVolume + state.sellVolume;
-  const pressure = total > 0 ? (state.buyVolume / total) * 100 : null;
-  const bookTotal = state.bids.reduce((s, x) => s + x.qty, 0) + state.asks.reduce((s, x) => s + x.qty, 0);
-  const imbalance = bookTotal > 0
-    ? ((state.bids.reduce((s, x) => s + x.qty, 0) - state.asks.reduce((s, x) => s + x.qty, 0)) / bookTotal) * 100
-    : null;
-
-  state.imbalancePct = imbalance;
+function updateSignal(m) {
+  pruneFlow(m);
+  const total = m.buyVolume + m.sellVolume;
+  const pressure = total > 0 ? (m.buyVolume / total) * 100 : null;
+  const bidDepth = m.bids.reduce((s, x) => s + x.qty, 0);
+  const askDepth = m.asks.reduce((s, x) => s + x.qty, 0);
+  const bookTotal = bidDepth + askDepth;
+  m.imbalancePct = bookTotal > 0 ? ((bidDepth - askDepth) / bookTotal) * 100 : null;
 
   let score = 50;
   const reasons = [];
@@ -61,130 +50,207 @@ function updateSignal() {
     else if (pressure <= 45) { score -= 9; reasons.push("Negative executed sell pressure"); }
   }
 
-  if (imbalance != null) {
-    if (imbalance >= 20) { score += 12; reasons.push("Bid-side book imbalance"); }
-    else if (imbalance >= 8) { score += 6; reasons.push("Mild bid-side imbalance"); }
-    else if (imbalance <= -20) { score -= 12; reasons.push("Ask-side book imbalance"); }
-    else if (imbalance <= -8) { score -= 6; reasons.push("Mild ask-side imbalance"); }
+  if (m.imbalancePct != null) {
+    if (m.imbalancePct >= 20) { score += 12; reasons.push("Bid-side book imbalance"); }
+    else if (m.imbalancePct >= 8) { score += 6; reasons.push("Mild bid-side imbalance"); }
+    else if (m.imbalancePct <= -20) { score -= 12; reasons.push("Ask-side book imbalance"); }
+    else if (m.imbalancePct <= -8) { score -= 6; reasons.push("Mild ask-side imbalance"); }
   }
 
-  if (state.spreadPct != null) {
-    if (state.spreadPct <= 0.02) { score += 5; reasons.push("Tight spread"); }
-    else if (state.spreadPct >= 0.08) { score -= 8; reasons.push("Wide spread"); }
+  if (m.spreadPct != null) {
+    if (m.spreadPct <= 0.02) { score += 5; reasons.push("Tight spread"); }
+    else if (m.spreadPct >= 0.08) { score -= 8; reasons.push("Wide spread"); }
   }
 
-  score = Math.max(0, Math.min(100, Math.round(score)));
-  state.score = score;
-  state.reasons = reasons.slice(0, 4);
-  state.signal = score >= 82 ? "WATCH" : score >= 70 ? "MONITOR" : "WAIT";
+  // Liquidity/volume context: high-volume pairs get a small ranking bonus.
+  if (m.quoteVolume24h >= 100_000_000) score += 5;
+  else if (m.quoteVolume24h >= 25_000_000) score += 3;
+
+  m.score = Math.max(0, Math.min(100, Math.round(score)));
+  m.reasons = reasons.slice(0, 4);
+  m.signal = m.score >= 82 ? "WATCH" : m.score >= 70 ? "MONITOR" : "WAIT";
 }
 
-function connectMarketStream() {
-  const streams = [
-    `${SYMBOL}@bookTicker`,
-    `${SYMBOL}@depth20@100ms`,
-    `${SYMBOL}@trade`
-  ].join("/");
+async function loadUniverse() {
+  const [infoRes, tickerRes] = await Promise.all([
+    fetch(`${API}/api/v3/exchangeInfo`),
+    fetch(`${API}/api/v3/ticker/24hr`)
+  ]);
+  if (!infoRes.ok || !tickerRes.ok) throw new Error("Binance market discovery failed");
 
-  const ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
+  const info = await infoRes.json();
+  const tickers = await tickerRes.json();
+  const allowed = new Map(
+    info.symbols
+      .filter(s => s.status === "TRADING" && s.quoteAsset === QUOTE && s.isSpotTradingAllowed)
+      .map(s => [s.symbol, s])
+  );
 
-  ws.on("open", () => {
-    state.connected = true;
-    state.error = null;
+  universe = tickers
+    .filter(t => allowed.has(t.symbol) && Number(t.quoteVolume) > 0)
+    .sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume))
+    .slice(0, MAX_COINS)
+    .map((t, i) => ({
+      rank: i + 1,
+      symbol: t.symbol,
+      volume24h: Number(t.volume),
+      quoteVolume24h: Number(t.quoteVolume),
+      priceChangePct24h: Number(t.priceChangePercent)
+    }));
+
+  for (const item of universe) {
+    const m = markets.get(item.symbol) || emptyMarket(item.symbol);
+    Object.assign(m, item);
+    markets.set(item.symbol, m);
+  }
+
+  const keep = new Set(universe.map(x => x.symbol));
+  for (const symbol of markets.keys()) if (!keep.has(symbol)) markets.delete(symbol);
+
+  connectStreams();
+}
+
+function connectStreams() {
+  if (socket) {
+    try { socket.close(); } catch {}
+    socket = null;
+  }
+
+  if (!universe.length) return;
+
+  const streams = universe.flatMap(x => [
+    `${x.symbol.toLowerCase()}@bookTicker`,
+    `${x.symbol.toLowerCase()}@trade`
+  ]).join("/");
+
+  socket = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
+
+  socket.on("open", () => {
+    for (const m of markets.values()) m.connected = true;
   });
 
-  ws.on("message", raw => {
+  socket.on("message", raw => {
     try {
       const packet = JSON.parse(raw.toString());
       const data = packet.data;
+      const m = markets.get(data.s);
+      if (!m) return;
       const now = Date.now();
 
       if (data.e === "bookTicker") {
-        state.bid = Number(data.b);
-        state.ask = Number(data.a);
-        state.last = state.last ?? Number(data.a);
-        state.spreadPct = state.bid > 0 ? ((state.ask - state.bid) / state.bid) * 100 : null;
-      }
-
-      if (data.e === "depthUpdate") {
-        state.bids = (data.b || []).slice(0, DEPTH_LEVELS).map(([price, qty]) => ({price:Number(price),qty:Number(qty)}));
-        state.asks = (data.a || []).slice(0, DEPTH_LEVELS).map(([price, qty]) => ({price:Number(price),qty:Number(qty)}));
+        m.bid = Number(data.b);
+        m.ask = Number(data.a);
+        m.last = m.last ?? Number(data.a);
+        m.spreadPct = m.bid > 0 ? ((m.ask - m.bid) / m.bid) * 100 : null;
       }
 
       if (data.e === "trade") {
         const qty = Number(data.q);
-        state.last = Number(data.p);
-        state.trades += 1;
-
-        if (data.m) state.sellVolume += qty;
-        else state.buyVolume += qty;
-
-        flow.push({ time: now, qty, buy: !data.m });
-        pruneFlow(now);
-        state.lastTradeAt = new Date(data.T || now).toISOString();
+        m.last = Number(data.p);
+        m.trades += 1;
+        const buy = !data.m;
+        if (buy) m.buyVolume += qty;
+        else m.sellVolume += qty;
+        m.flow.push({time: now, qty, buy});
+        pruneFlow(m);
+        m.lastTradeAt = new Date(data.T || now).toISOString();
       }
 
-      state.updatedAt = new Date().toISOString();
-      updateSignal();
+      m.updatedAt = new Date().toISOString();
+      updateSignal(m);
     } catch {
-      state.error = "Invalid market stream payload";
+      // Ignore malformed packets; the next stream packet remains usable.
     }
   });
 
-  ws.on("close", () => {
-    state.connected = false;
-    setTimeout(connectMarketStream, 1500);
+  socket.on("close", () => {
+    for (const m of markets.values()) m.connected = false;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connectStreams, 1500);
   });
 
-  ws.on("error", err => {
-    state.connected = false;
-    state.error = err.message;
-    ws.close();
+  socket.on("error", () => {
+    try { socket.close(); } catch {}
   });
 }
 
-function snapshot() {
-  pruneFlow();
-  const total = state.buyVolume + state.sellVolume;
-  const windowBuy = flow.filter(x => x.buy).reduce((s, x) => s + x.qty, 0);
-  const windowSell = flow.filter(x => !x.buy).reduce((s, x) => s + x.qty, 0);
+async function refreshUniverse() {
+  try {
+    await loadUniverse();
+    console.log(`Scanner universe: ${universe.length} USDT spot pairs`);
+  } catch (err) {
+    console.error(err.message);
+    clearTimeout(universeTimer);
+    universeTimer = setTimeout(refreshUniverse, 5000);
+  }
+}
+
+function snapshot(m) {
+  pruneFlow(m);
+  const total = m.buyVolume + m.sellVolume;
+  const windowBuy = m.flow.filter(x => x.buy).reduce((s, x) => s + x.qty, 0);
+  const windowSell = m.flow.filter(x => !x.buy).reduce((s, x) => s + x.qty, 0);
   const windowTotal = windowBuy + windowSell;
 
   return {
-    ...state,
-    buyPressurePct: total > 0 ? (state.buyVolume / total) * 100 : null,
+    ...m,
+    flow: undefined,
+    buyPressurePct: total > 0 ? (m.buyVolume / total) * 100 : null,
     flowVolume: total,
     windowBuyVolume: windowBuy,
     windowSellVolume: windowSell,
-    windowBuyPressurePct: windowTotal > 0 ? (windowBuy / windowTotal) * 100 : null,
-    bidDepth: state.bids.reduce((s, x) => s + x.qty, 0),
-    askDepth: state.asks.reduce((s, x) => s + x.qty, 0)
+    windowBuyPressurePct: windowTotal > 0 ? (windowBuy / windowTotal) * 100 : null
   };
+}
+
+function scannerSnapshot() {
+  return universe.map((u) => snapshot(markets.get(u.symbol) || emptyMarket(u.symbol)))
+    .sort((a, b) => b.score - a.score);
 }
 
 const server = http.createServer((req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Type", "application/json");
 
   if (req.url === "/health") {
-    res.writeHead(200, {"Content-Type":"application/json"});
-    return res.end(JSON.stringify({ok:true,marketStream:state.connected}));
+    res.writeHead(200);
+    return res.end(JSON.stringify({
+      ok: true,
+      universeSize: universe.length,
+      streamConnected: Boolean(socket && socket.readyState === WebSocket.OPEN)
+    }));
+  }
+
+  if (req.url === "/api/market/scanner") {
+    res.writeHead(200);
+    return res.end(JSON.stringify({
+      universeSize: universe.length,
+      quote: QUOTE,
+      updatedAt: new Date().toISOString(),
+      markets: scannerSnapshot()
+    }));
   }
 
   if (req.url === "/api/market/btcusdt") {
-    res.writeHead(200, {"Content-Type":"application/json"});
-    return res.end(JSON.stringify(snapshot()));
+    const btc = markets.get("BTCUSDT");
+    res.writeHead(200);
+    return res.end(JSON.stringify(btc ? snapshot(btc) : {error:"BTCUSDT not in scanner universe"}));
   }
 
   if (req.url === "/api/market/reset-flow" && req.method === "POST") {
-    resetFlow();
+    for (const m of markets.values()) {
+      m.buyVolume = 0; m.sellVolume = 0; m.trades = 0; m.flow = [];
+    }
     res.writeHead(204);
     return res.end();
   }
 
-  res.writeHead(404, {"Content-Type":"application/json"});
+  res.writeHead(404);
   res.end(JSON.stringify({error:"Not found"}));
 });
 
-connectMarketStream();
 server.listen(PORT, () => console.log(`FK Signal Hunter API listening on :${PORT}`));
+
+refreshUniverse();
+setInterval(refreshUniverse, REFRESH_UNIVERSE_MS);
