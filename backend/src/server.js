@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import { CrossExchangeHub, EXCHANGE_NAMES } from "./exchangeHub.js";
 import { PaperEngine } from "./paperEngine.js";
 import { buildOpportunity } from "./signalEngine.js";
+import { runBacktest } from "./backtestEngine.js";
 
 const PORT = Number(process.env.PORT || 3001);
 const API = "https://api.binance.com";
