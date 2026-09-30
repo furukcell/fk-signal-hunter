@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { gunzipSync } from "node:zlib";
 
 const EXCHANGE_NAMES = [
   "binance", "coinbase", "upbit", "okx", "bybit",
@@ -410,7 +411,7 @@ class CrossExchangeHub {
       const zlib = data;
       if (Buffer.isBuffer(zlib)) {
         try {
-          const text = requireGunzip(zlib);
+          const text = gunzipSync(zlib).toString("utf8");
           const msg = JSON.parse(text);
           if (msg.ping) { ws.send(JSON.stringify({ pong: msg.ping })); return; }
           const ch = msg.ch || "";
@@ -436,11 +437,5 @@ class CrossExchangeHub {
   }
 }
 
-function requireGunzip(buffer) {
-  return (globalThis.Bun ? Bun.gzipSync(buffer) : null) || (() => {
-    // Node's createGunzip is imported lazily to keep the adapter self-contained.
-    throw new Error("HTX gzip decoder requires node:zlib integration");
-  })();
-}
 
 export { CrossExchangeHub, EXCHANGE_NAMES };
