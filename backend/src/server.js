@@ -818,13 +818,13 @@ async function boot() {
       loadUniverse().catch(error => console.error("Universe refresh failed:", error.message));
     }, REFRESH_UNIVERSE_MS);
 
-    apiServer.listen(PORT, () => {
+    apiServer.listen(PORT, "0.0.0.0", () => {
       console.log(`FK Signal Hunter API listening on :${PORT}`);
       console.log(`Tracking up to ${universe.length} assets across ${EXCHANGE_NAMES.length} exchanges`);
     });
   } catch (error) {
     console.error("FK Signal Hunter startup failed:", error);
-    apiServer.listen(PORT, () => {
+    apiServer.listen(PORT, "0.0.0.0", () => {
       console.log(`FK Signal Hunter API listening on :${PORT} (market discovery pending)`);
     });
     loadUniverse().catch(err => console.error("Initial universe retry failed:", err.message));
