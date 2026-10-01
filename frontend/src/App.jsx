@@ -121,7 +121,7 @@ export default function App(){
       <section className="content">
         {error&&<div className="notice"><RefreshCw size={17}/><div><b>Piyasa verisi:</b> {error}</div></div>}
         {tab==="Ana Sayfa"&&<Dashboard data={data} market={market} selectMarket={selectMarket}/>}
-        {tab==="24 Saatlik Tarama"&&<Scanner analytics={analytics} markets={markets} selectMarket={selectMarket}/>}
+        {tab==="24 Saatlik Tarama"&&<Scanner analytics={analytics} markets={markets} history={history} historyError={historyError} selectMarket={selectMarket}/>}
         {tab==="Sinyaller"&&<Signals data={data} analytics={analytics}/>}
         {tab==="İşlem Geçmişi"&&<Trades paper={data?.paper}/>}
         {tab==="Performans"&&<Performance paper={data?.paper}/>}
