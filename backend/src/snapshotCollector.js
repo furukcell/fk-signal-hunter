@@ -484,7 +484,6 @@ async function runPaper(previous, markets, now) {
       holdingMinutes: Math.max(0, (now - p.openedAt) / 60000),
       reason: hitTp ? "TP_1PCT" : "SL_0_8PCT",
       exitType: hitTp ? "KAR_HEDEFI" : "ZARAR_KES",
-      holdingMinutes: Math.max(0, (now - p.openedAt) / 60000),
       scoreAtEntry: p.score
     };
 
