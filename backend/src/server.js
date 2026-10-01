@@ -862,6 +862,7 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   if (universeTimer) clearInterval(universeTimer);
   historical.stop();
+  clearInterval(signalTrackerTimer);
   hub?.stop();
   apiServer.close(() => process.exit(0));
 });
