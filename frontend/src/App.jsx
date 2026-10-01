@@ -46,7 +46,6 @@ export default function App(){
 
  const score=useMemo(()=>signalScore(market),[market]);
  const connected=exchangeCount(market)>0;
- const snapshotAt = market?.updatedAt ? new Date(market.updatedAt) : null;
 
  return <div className="app">
   <aside className={open?'side open':'side'}>
@@ -55,7 +54,7 @@ export default function App(){
    <div className="bottom"><div className="paper"><i/> <div><b>PAPER MODE</b><span>Real money disabled</span></div></div><div className="engine"><Bot size={16}/> Engine <b>ONLINE</b></div></div>
   </aside>
   <main>
-   <header><button className="menu" onClick={()=>setOpen(true)}><Menu size={20}/></button><div><small>PERSONAL TRADING SYSTEM</small><h1>{tab}</h1></div><div className="actions"><span className="market"><i className={connected?'live':''}/> {connected?'5-minute snapshot connected':'Snapshot disconnected'}</span><button className="start" disabled><Bot size={15}/> Start Bot</button></div></header>
+   <header><button className="menu" onClick={()=>setOpen(true)}><Menu size={20}/></button><div><small>PERSONAL TRADING SYSTEM</small><h1>{tab}</h1></div><div className="actions"><span className="market"><i className={connected?'live':''}/> {connected?'5-minute snapshot online':'Snapshot disconnected'}</span><button className="start" disabled><Bot size={15}/> Start Bot</button></div></header>
    <section className="content">{tab==='Dashboard'?<DashboardContent market={market} scanner={scanner} score={score} connected={connected} error={error} paper={paper}/>:<ModuleView tab={tab}/>}</section>
   </main>
  </div>
