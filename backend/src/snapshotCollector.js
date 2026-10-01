@@ -208,59 +208,150 @@ async function mapConcurrent(items, concurrency, worker) {
 function bookFeatures(book) {
   const bids = (book?.bids || []).map(x => [num(x[0]), num(x[1])]).filter(x => x[0] > 0 && x[1] > 0);
   const asks = (book?.asks || []).map(x => [num(x[0]), num(x[1])]).filter(x => x[0] > 0 && x[1] > 0);
-  const bidNotional = bids.reduce((s, x) => s + x[0] * x[1], 0);
-  const askNotional = asks.reduce((s, x) => s + x[0] * x[1], 0);
-  const total = bidNotional + askNotional;
+
+  const imbalance = (bidRows, askRows) => {
+    const bidNotional = bidRows.reduce((s, x) => s + x[0] * x[1], 0);
+    const askNotional = askRows.reduce((s, x) => s + x[0] * x[1], 0);
+    const total = bidNotional + askNotional;
+    return {
+      pct: total > 0 ? ((bidNotional - askNotional) / total) * 100 : null,
+      depth: total
+    };
+  };
+
+  const l1 = imbalance(bids.slice(0, 1), asks.slice(0, 1));
+  const l5 = imbalance(bids.slice(0, 5), asks.slice(0, 5));
+  const l20 = imbalance(bids.slice(0, 20), asks.slice(0, 20));
+
+  const bestBid = bids[0];
+  const bestAsk = asks[0];
+  let microPrice = null;
+  let microPriceOffsetPct = null;
+  if (bestBid && bestAsk) {
+    const totalQty = bestBid[1] + bestAsk[1];
+    microPrice = totalQty > 0
+      ? ((bestAsk[0] * bestBid[1]) + (bestBid[0] * bestAsk[1])) / totalQty
+      : null;
+    const mid = (bestBid[0] + bestAsk[0]) / 2;
+    microPriceOffsetPct = mid > 0 && microPrice != null ? ((microPrice - mid) / mid) * 100 : null;
+  }
+
   return {
     bids: bids.slice(0, ORDERBOOK_LIMIT).map(x => ({ price: x[0], qty: x[1] })),
     asks: asks.slice(0, ORDERBOOK_LIMIT).map(x => ({ price: x[0], qty: x[1] })),
-    imbalancePct: total > 0 ? ((bidNotional - askNotional) / total) * 100 : null
+    imbalancePct: l20.pct,
+    imbalanceL1Pct: l1.pct,
+    imbalanceL5Pct: l5.pct,
+    imbalanceL20Pct: l20.pct,
+    depthNotionalL5: l5.depth,
+    depthNotionalL20: l20.depth,
+    microPrice,
+    microPriceOffsetPct
   };
 }
 
 function scoreMarket(m) {
+  // V2 is deliberately feature-based: no single metric can trigger a buy.
+  // The weights are initial hypotheses and must be validated with the paper log.
   let score = 50;
   const reasons = [];
-  const momentum = num(m.priceChangePct24h) ?? 0;
-  if (momentum >= 1) { score += 10; reasons.push("Positive 24h momentum"); }
-  else if (momentum >= 0.25) score += 5;
-  else if (momentum <= -1) { score -= 10; reasons.push("Negative 24h momentum"); }
-  else if (momentum <= -0.25) score -= 5;
+  const add = (points, reason, positive = true) => {
+    score += points;
+    if (reason && Math.abs(points) >= 4) reasons.push((positive ? "+" : "-") + " " + reason);
+  };
 
-  if (m.quoteVolume24h >= 100_000_000) { score += 8; reasons.push("High 24h liquidity"); }
-  else if (m.quoteVolume24h >= 25_000_000) score += 4;
+  const flow = num(m.netFlowRatio5m) ?? 0;
+  const relVol = num(m.relativeVolume5m) ?? 0;
+  const mom5 = num(m.priceChangePct5m) ?? 0;
+  const mom15 = num(m.priceChangePct15m) ?? 0;
+  const mom30 = num(m.priceChangePct30m) ?? 0;
+  const mom60 = num(m.priceChangePct60m) ?? 0;
+  const l5 = num(m.imbalanceL5Pct ?? m.weightedImbalancePct) ?? 0;
+  const micro = num(m.microPriceOffsetPct) ?? 0;
+  const cross = num(m.crossExchangeBuyPct) ?? 0;
+  const absorption = num(m.absorptionScore) ?? 0;
+  const spread = num(m.spreadPct) ?? 999;
+  const breadth = num(m.marketBreadth5mPct) ?? 50;
+  const btc5 = num(m.btcMomentum5m) ?? 0;
+  const btc15 = num(m.btcMomentum15m) ?? 0;
 
-  if (m.activeExchangeCount >= 7) { score += 7; reasons.push("Strong exchange coverage"); }
-  else if (m.activeExchangeCount >= 4) score += 4;
-  else if (m.activeExchangeCount < 2) { score -= 8; reasons.push("Low exchange coverage"); }
+  if (flow >= 0.30) add(12, "Güçlü 5 dk net alıcı akışı");
+  else if (flow >= 0.15) add(7, "Pozitif 5 dk alıcı akışı");
+  else if (flow <= -0.30) add(-12, "Güçlü 5 dk satıcı akışı", false);
+  else if (flow <= -0.15) add(-7, "Negatif 5 dk satıcı akışı", false);
 
-  if (m.priceDispersionPct != null) {
-    if (m.priceDispersionPct <= 0.20) score += 4;
-    else if (m.priceDispersionPct >= 1) score -= 4;
-  }
+  if (relVol >= 3) add(10, "Olağandışı 5 dk hacim");
+  else if (relVol >= 1.5) add(7, "Yüksek 5 dk hacim");
+  else if (relVol >= 1.15) add(3, null);
+  else if (relVol > 0 && relVol < 0.5) add(-4, "Zayıf işlem aktivitesi", false);
 
-  if (m.weightedImbalancePct != null) {
-    if (m.weightedImbalancePct >= 20) { score += 12; reasons.push("Strong bid-side depth"); }
-    else if (m.weightedImbalancePct >= 8) score += 6;
-    else if (m.weightedImbalancePct <= -20) { score -= 12; reasons.push("Strong ask-side depth"); }
-    else if (m.weightedImbalancePct <= -8) score -= 6;
-  }
+  if (mom5 >= 0.30) add(10, "Pozitif 5 dk momentum");
+  else if (mom5 >= 0.10) add(5, "Pozitif kısa momentum");
+  else if (mom5 <= -0.30) add(-10, "Negatif 5 dk momentum", false);
+  else if (mom5 <= -0.10) add(-5, "Negatif kısa momentum", false);
 
-  if (m.spreadPct != null) {
-    if (m.spreadPct <= 0.05) score += 4;
-    else if (m.spreadPct >= 0.20) score -= 5;
-  }
+  if (mom15 >= 0.50) add(8, "15 dk trend yukarı");
+  else if (mom15 >= 0.15) add(4, null);
+  else if (mom15 <= -0.50) add(-8, "15 dk trend aşağı", false);
 
-  if (m.buyPressurePct != null) {
-    if (m.buyPressurePct >= 60) { score += 10; reasons.push("Binance buy pressure"); }
-    else if (m.buyPressurePct >= 55) score += 5;
-    else if (m.buyPressurePct <= 40) { score -= 10; reasons.push("Binance sell pressure"); }
-    else if (m.buyPressurePct <= 45) score -= 5;
+  if (mom30 >= 0.75) add(3, "30 dk yön teyidi");
+  else if (mom30 <= -0.75) add(-3, null, false);
+
+  if (mom60 >= 1.0) add(5, "1 saatlik trend yukarı");
+  else if (mom60 <= -1.0) add(-5, "1 saatlik trend aşağı", false);
+
+  if (l5 >= 20) add(10, "L5 emir defteri alıcı lehine");
+  else if (l5 >= 8) add(6, "L5 emir defteri alıcı lehine");
+  else if (l5 <= -20) add(-10, "L5 emir defteri satıcı lehine", false);
+  else if (l5 <= -8) add(-6, "L5 emir defteri satıcı lehine", false);
+
+  if (micro >= 0.015) add(6, "Mikro fiyat alıcı lehine");
+  else if (micro >= 0.005) add(3, null);
+  else if (micro <= -0.015) add(-6, "Mikro fiyat satıcı lehine", false);
+
+  if (cross >= 75) add(8, "Borsalar arası yükseliş teyidi");
+  else if (cross >= 60) add(5, null);
+  else if (cross < 40) add(-6, "Borsalarda teyit zayıf", false);
+
+  if (absorption >= 0.5) add(8, "Satış baskısı emiliyor");
+  else if (absorption >= 0.2) add(4, null);
+  else if (absorption <= -0.5) add(-8, "Alış baskısı emiliyor", false);
+
+  if (spread <= 0.05) add(5, "Dar alış-satış farkı");
+  else if (spread <= 0.10) add(3, null);
+  else if (spread >= 0.30) add(-7, "Geniş alış-satış farkı", false);
+
+  if (Number(m.quoteVolume24h || 0) >= 100_000_000) add(4, "Yüksek likidite");
+  else if (Number(m.quoteVolume24h || 0) >= 25_000_000) add(2, null);
+
+  if (breadth >= 65) add(4, "Piyasa geneli pozitif");
+  else if (breadth <= 35) add(-4, "Piyasa geneli zayıf", false);
+
+  // BTC is used as a regime filter for altcoins, not as a blind buy signal.
+  if (m.symbol !== "BTCUSDT") {
+    if (btc5 <= -1.0 || btc15 <= -1.5) add(-8, "BTC kısa vadede risk-off", false);
+    else if (btc5 >= 0.50 && btc15 >= 0.50) add(3, "BTC piyasa rejimi destekliyor");
   }
 
   m.score = clamp(Math.round(score), 0, 100);
   m.signal = m.score >= 82 ? "WATCH" : m.score >= 70 ? "MONITOR" : "WAIT";
-  m.reasons = reasons.slice(0, 5);
+  m.reasons = reasons.slice(0, 6);
+
+  const hardFilters = [
+    m.activeExchangeCount >= 3,
+    Number(m.quoteVolume24h || 0) >= 10_000_000,
+    spread > 0 && spread <= 0.15,
+    flow >= 0.10,
+    relVol >= 1.0,
+    mom5 > 0,
+    l5 >= 5,
+    cross >= 50,
+    absorption > -0.35
+  ];
+  m.entryReady = m.score >= 82 && hardFilters.every(Boolean);
+  m.entryFilterPassCount = hardFilters.filter(Boolean).length;
+  m.entryFilterTotal = hardFilters.length;
+  m.entryDecision = m.entryReady ? "AL_ADAYI" : m.score >= 82 ? "BEKLE_FİLTRE" : "BEKLE";
 }
 
 function aggregateUniverse(bases, rows) {
@@ -272,7 +363,9 @@ function aggregateUniverse(bases, rows) {
       quoteVolume24h: 0, volume24h: 0, priceChangePct24h: null,
       exchangeCount: 0, activeExchangeCount: 0, staleExchangeCount: 0,
       priceDispersionPct: null, buyConsensus: 0, buyPressurePct: null,
-      imbalancePct: null, weightedImbalancePct: null, bids: [], asks: [],
+      imbalancePct: null, imbalanceL1Pct: null, imbalanceL5Pct: null, imbalanceL20Pct: null,
+      weightedImbalancePct: null, depthNotionalL5: null, depthNotionalL20: null,
+      microPrice: null, microPriceOffsetPct: null, bids: [], asks: [],
       exchangeData: {}, score: 50, signal: "WAIT", reasons: [], updatedAt: Date.now()
     });
   }
@@ -370,12 +463,97 @@ async function enrichDepth(markets, exchanges) {
   for (const m of markets) {
     const rows = Object.values(m.exchangeData).filter(x => x.bids?.length && x.asks?.length);
     if (!rows.length) continue;
-    const values = rows.map(x => Number(x.imbalancePct)).filter(Number.isFinite);
-    m.weightedImbalancePct = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+    const weighted = rows.map(x => ({
+      imbalance: Number(x.imbalancePct),
+      depth: Number(x.depthNotionalL20 || 0)
+    })).filter(x => Number.isFinite(x.imbalance));
+    const totalDepth = weighted.reduce((s, x) => s + x.depth, 0);
+    m.weightedImbalancePct = weighted.length
+      ? (totalDepth > 0
+          ? weighted.reduce((s, x) => s + x.imbalance * x.depth, 0) / totalDepth
+          : weighted.reduce((s, x) => s + x.imbalance, 0) / weighted.length)
+      : null;
     const preferred = rows.find(x => x.exchange === "binance") || rows[0];
     m.bids = preferred.bids;
     m.asks = preferred.asks;
     m.imbalancePct = preferred.imbalancePct;
+    m.imbalanceL1Pct = preferred.imbalanceL1Pct;
+    m.imbalanceL5Pct = preferred.imbalanceL5Pct;
+    m.imbalanceL20Pct = preferred.imbalanceL20Pct;
+    m.depthNotionalL5 = preferred.depthNotionalL5;
+    m.depthNotionalL20 = preferred.depthNotionalL20;
+    m.microPrice = preferred.microPrice;
+    m.microPriceOffsetPct = preferred.microPriceOffsetPct;
+    scoreMarket(m);
+  }
+}
+
+function historicalPrice(history, symbol, targetMs, now) {
+  const rows = Array.isArray(history?.[symbol]) ? history[symbol] : [];
+  const target = now - targetMs;
+  let best = null;
+  for (const row of rows) {
+    const age = Math.abs(Number(row.ts) - target);
+    if (Number.isFinite(age) && age <= 4 * 60 * 1000 && (!best || age < best.age)) best = { ...row, age };
+  }
+  return best;
+}
+
+function applyEntryFeatures(markets, previousState, now) {
+  let history = {};
+  try {
+    history = previousState?.marketHistory || {};
+  } catch {}
+
+  for (const m of markets) {
+    const rows = Array.isArray(history[m.symbol]) ? history[m.symbol] : [];
+    const previous = rows.length ? rows[rows.length - 1] : null;
+    const current = num(m.last);
+
+    m.priceChangePct5m = previous && current && previous.price > 0
+      ? ((current - previous.price) / previous.price) * 100 : null;
+
+    const p15 = historicalPrice(history, m.symbol, 15 * 60 * 1000, now);
+    const p30 = historicalPrice(history, m.symbol, 30 * 60 * 1000, now);
+    const p60 = historicalPrice(history, m.symbol, 60 * 60 * 1000, now);
+    m.priceChangePct15m = p15 && current && p15.price > 0 ? ((current - p15.price) / p15.price) * 100 : null;
+    m.priceChangePct30m = p30 && current && p30.price > 0 ? ((current - p30.price) / p30.price) * 100 : null;
+    m.priceChangePct60m = p60 && current && p60.price > 0 ? ((current - p60.price) / p60.price) * 100 : null;
+
+    const average5m = Number(m.quoteVolume24h || 0) / 288;
+    m.relativeVolume5m = average5m > 0 && Number(m.flowVolume5m) >= 0
+      ? Number(m.flowVolume5m || 0) / average5m : null;
+    m.netFlowRatio5m = Number(m.flowVolume5m || 0) > 0
+      ? Number(m.netFlow5m || 0) / Number(m.flowVolume5m) : null;
+
+    const exchangeChanges = Object.entries(m.exchangeData || []).map(([exchange, venue]) => {
+      const prevPrice = previous?.exchangePrices?.[exchange];
+      const price = num(venue?.price);
+      return prevPrice && price && prevPrice > 0
+        ? ((price - prevPrice) / prevPrice) * 100 : null;
+    }).filter(Number.isFinite);
+    m.crossExchangeBuyPct = exchangeChanges.length
+      ? (exchangeChanges.filter(x => x > 0).length / exchangeChanges.length) * 100 : null;
+
+    const priceMove = Number(m.priceChangePct5m || 0);
+    const flow = Number(m.netFlowRatio5m || 0);
+    // Positive value means aggressive selling failed to push price down
+    // (potential bid-side absorption); negative means the opposite.
+    m.absorptionScore = flow <= -0.15
+      ? clamp((-flow) * 2 + Math.max(0, priceMove) * 2, -1, 1)
+      : flow >= 0.15
+        ? clamp(flow * 2 + Math.max(0, -priceMove) * 2, -1, 1) * -1
+        : 0;
+  }
+
+  const validMoves = markets.map(m => num(m.priceChangePct5m)).filter(Number.isFinite);
+  const positive = validMoves.filter(x => x > 0).length;
+  const breadth = validMoves.length ? (positive / validMoves.length) * 100 : 50;
+  for (const m of markets) {
+    m.marketBreadth5mPct = breadth;
+    const btc = markets.find(x => x.symbol === "BTCUSDT");
+    m.btcMomentum5m = btc?.priceChangePct5m ?? null;
+    m.btcMomentum15m = btc?.priceChangePct15m ?? null;
     scoreMarket(m);
   }
 }
@@ -415,6 +593,7 @@ async function runPaper(previous, markets, now) {
     peakEquity: 1000,
     maxDrawdownPct: 0,
     equityHistory: [],
+    marketHistory: {},
     lastRunAt: null
   };
 
@@ -423,19 +602,7 @@ async function runPaper(previous, markets, now) {
   state.positions = Array.isArray(state.positions) ? state.positions : [];
   state.trades = Array.isArray(state.trades) ? state.trades : [];
   state.equityHistory = Array.isArray(state.equityHistory) ? state.equityHistory : [];
-  state.marketPrices = state.marketPrices && typeof state.marketPrices === "object" ? state.marketPrices : {};
-
-  // Compare this scan with the previous 5-minute scan. This is deliberately
-  // separate from the 24h momentum so the UI can show the short-term move.
-  for (const m of markets) {
-    const previousPrice = num(state.marketPrices[m.symbol]);
-    m.priceChangePct5m = previousPrice != null && previousPrice > 0 && m.last != null
-      ? ((m.last - previousPrice) / previousPrice) * 100
-      : null;
-  }
-  state.marketPrices = Object.fromEntries(
-    markets.map(m => [m.symbol, m.last]).filter(([, price]) => price != null)
-  );
+  state.marketHistory = state.marketHistory && typeof state.marketHistory === "object" ? state.marketHistory : {};
 
   const map = new Map(markets.map(m => [m.symbol, m]));
   const closedTrades = [];
@@ -495,13 +662,12 @@ async function runPaper(previous, markets, now) {
   state.trades = state.trades.slice(0, 200);
 
   const candidates = markets
-    .filter(m =>
-      m.score >= 82 &&
-      m.activeExchangeCount >= 3 &&
-      Number(m.quoteVolume24h || 0) >= 10_000_000 &&
-      Number(m.spreadPct ?? 999) <= 0.30
-    )
-    .sort((a, b) => b.score - a.score);
+    .filter(m => m.entryReady)
+    .sort((a, b) => {
+      const scoreDiff = (b.score || 0) - (a.score || 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return (b.relativeVolume5m || 0) - (a.relativeVolume5m || 0);
+    });
 
   // Sequential paper trading: one open position at a time, 10% of current cash per trade.
   // There is no daily trade-count limit. Once a position closes, the next eligible opportunity can use the newly available cash.
@@ -610,6 +776,24 @@ async function runPaper(previous, markets, now) {
     realizedPnl: state.realizedPnl,
     openPositions: state.positions.length
   });
+
+  // Keep a compact 5-minute feature history for multi-horizon signals and
+  // absorption/cross-exchange confirmation. This is intentionally capped.
+  for (const m of markets) {
+    const rows = Array.isArray(state.marketHistory[m.symbol]) ? state.marketHistory[m.symbol] : [];
+    rows.push({
+      ts: now,
+      price: m.last,
+      flow5m: m.flowVolume5m,
+      netFlow5m: m.netFlow5m,
+      buyPressure5mPct: m.buyPressure5mPct,
+      imbalanceL5Pct: m.imbalanceL5Pct,
+      exchangePrices: Object.fromEntries(
+        Object.entries(m.exchangeData || {}).map(([exchange, venue]) => [exchange, venue?.price]).filter(([, price]) => price != null)
+      )
+    });
+    state.marketHistory[m.symbol] = rows.slice(-20);
+  }
   state.equityHistory = state.equityHistory.slice(-2000);
 
   return { state, closedTrades };
@@ -626,8 +810,19 @@ function compact(m) {
     flowVolume5m: m.flowVolume5m, netFlow5m: m.netFlow5m, buyPressure5mPct: m.buyPressure5mPct,
     sellPressure5mPct: m.sellPressure5mPct, trades5m: m.trades5m, flow5mAt: m.flow5mAt,
     flow5mCloseAt: m.flow5mCloseAt, candle5mOpen: m.candle5mOpen, candle5mHigh: m.candle5mHigh,
-    candle5mLow: m.candle5mLow, candle5mClose: m.candle5mClose, imbalancePct: m.imbalancePct,
-    weightedImbalancePct: m.weightedImbalancePct, bids: m.bids, asks: m.asks,
+    candle5mLow: m.candle5mLow, candle5mClose: m.candle5mClose,
+    imbalancePct: m.imbalancePct, imbalanceL1Pct: m.imbalanceL1Pct, imbalanceL5Pct: m.imbalanceL5Pct,
+    imbalanceL20Pct: m.imbalanceL20Pct, weightedImbalancePct: m.weightedImbalancePct,
+    depthNotionalL5: m.depthNotionalL5, depthNotionalL20: m.depthNotionalL20,
+    microPrice: m.microPrice, microPriceOffsetPct: m.microPriceOffsetPct,
+    relativeVolume5m: m.relativeVolume5m, netFlowRatio5m: m.netFlowRatio5m,
+    priceChangePct15m: m.priceChangePct15m, priceChangePct30m: m.priceChangePct30m,
+    priceChangePct60m: m.priceChangePct60m, crossExchangeBuyPct: m.crossExchangeBuyPct,
+    absorptionScore: m.absorptionScore, marketBreadth5mPct: m.marketBreadth5mPct,
+    btcMomentum5m: m.btcMomentum5m, btcMomentum15m: m.btcMomentum15m,
+    entryReady: m.entryReady, entryFilterPassCount: m.entryFilterPassCount,
+    entryFilterTotal: m.entryFilterTotal, entryDecision: m.entryDecision,
+    bids: m.bids, asks: m.asks,
     score: m.score, signal: m.signal, reasons: m.reasons, opportunity: m.opportunity,
     exchangeData: m.exchangeData, updatedAt: m.updatedAt
   };
@@ -705,10 +900,12 @@ async function main() {
 
   await enrichDepth(markets, exchanges);
 
-  for (const m of markets) m.opportunity = buildOpportunity(m);
   const now = Date.now();
   const previous = await firebase.read("public", "paperState");
-  const paperResult = await runPaper(previous?.payload ? JSON.parse(previous.payload) : null, markets, now);
+  const previousPaper = previous?.payload ? JSON.parse(previous.payload) : null;
+  applyEntryFeatures(markets, previousPaper, now);
+  for (const m of markets) m.opportunity = buildOpportunity(m);
+  const paperResult = await runPaper(previousPaper, markets, now);
   const paper = paperResult.state;
   for (const trade of paperResult.closedTrades) {
     await firebase.recordPaperTrade(trade);
