@@ -13,6 +13,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Sanal işlem geçmişi yalnızca görüntülenebilir; yazma işlemini backend Admin SDK yapar.
+    match /paperTrades/{document} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

@@ -25,6 +25,32 @@ async function fetchTarama(){
   return JSON.parse(raw);
 }
 
+async function fetchPaperTrades(){
+  const body={
+    structuredQuery:{
+      from:[{collectionId:"paperTrades"}],
+      orderBy:[{field:{fieldPath:"closedAt"},direction:"DESCENDING"}],
+      limit:1000
+    }
+  };
+  const res=await fetch(HISTORY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),cache:"no-store"});
+  if(!res.ok) throw new Error("İşlem geçmişi alınamadı");
+  const rows=await res.json();
+  return (rows||[]).map(row=>row?.document?.fields).filter(Boolean).map(fields=>Object.fromEntries(Object.entries(fields).map(([k,v])=>[k,firestoreValue(v)])));
+}
+
+function firestoreValue(v){
+  if(v==null)return null;
+  if(v.stringValue!==undefined)return v.stringValue;
+  if(v.integerValue!==undefined)return Number(v.integerValue);
+  if(v.doubleValue!==undefined)return Number(v.doubleValue);
+  if(v.booleanValue!==undefined)return v.booleanValue;
+  if(v.timestampValue!==undefined)return v.timestampValue;
+  if(v.mapValue!==undefined)return Object.fromEntries(Object.entries(v.mapValue.fields||{}).map(([k,x])=>[k,firestoreValue(x)]));
+  if(v.arrayValue!==undefined)return (v.arrayValue.values||[]).map(firestoreValue);
+  return null;
+}
+
 async function fetchHistory24h(){
   const since=new Date(Date.now()-24*60*60*1000).toISOString();
   const body={
@@ -73,7 +99,7 @@ export default function App(){
   const [tab,setTab]=useState("Ana Sayfa");
   const [data,setData]=useState(null);
   const [market,setMarket]=useState(null);
-  const [history,setHistory]=useState([]);
+  const [history,setHistory]=useState([]);\n  const [paperTrades,setPaperTrades]=useState([]);\n  const [paperTradesError,setPaperTradesError]=useState(null);
   const [historyError,setHistoryError]=useState(null);
   const [error,setError]=useState(null);
 
@@ -168,7 +194,7 @@ function Dashboard({data,market,selectMarket}){
       </section>
       <section className="card">
         <div className="head"><div><small>SON KAPANAN İŞLEMLER</small><h2>İşlem Geçmişi</h2></div><span className="tag">{paper.totalTrades??trades.length} işlem</span></div>
-        <TradeRows trades={trades.slice(0,6)}/>
+        <TradeRows trades={(paperTrades.length?paperTrades:trades).slice(0,6)}/>
       </section>
     </div>
   </>;
@@ -308,6 +334,18 @@ function MarketDetail({market,history}){
   </section>;
 }
 
+function PriceChart({history}){
+  const values=history.filter(x=>Number.isFinite(Number(x.last))).map(x=>Number(x.last));
+  if(values.length<2)return <div className="chartEmpty"><BarChart3 size={24}/><b>Fiyat grafiği oluşuyor</b><span>5 dakikalık geçmiş biriktikçe 24 saatlik grafik dolacak.</span></div>;
+  const w=1000,h=260,p=30,min=Math.min(...values),max=Math.max(...values),range=max-min||1;
+  const points=values.map((v,i)=>{
+    const x=p+(i/(values.length-1))*(w-p*2);
+    const y=h-p-((v-min)/range)*(h-p*2);
+    return (i?"L":"M")+" "+x.toFixed(1)+" "+y.toFixed(1);
+  }).join(" ");
+  return <div className="priceChart"><svg viewBox={"0 0 "+w+" "+h}><path d={points} className="line"/></svg><div className="chartAxis"><span>24 saat önce</span><span>{price(values[0])}</span><span>Şimdi · {price(values[values.length-1])}</span></div></div>;
+}
+
 function FlowChart({history}){
   if(history.length<2)return <div className="chartEmpty"><BarChart3 size={24}/><b>24 saatlık akış grafiği oluşuyor</b><span>Her 5 dakikalık taramada bir nokta kaydedilecek.</span></div>;
   const w=1000,h=260,p=30,values=history.map(x=>Number(x.net)||0);
@@ -355,8 +393,8 @@ function Trades({paper}){
       <Stat icon={TrendingUp} label="Net Kâr/Zarar" value={(paper?.realizedPnl??0).toFixed(2)+" TL"} detail={(paper?.returnPct??0).toFixed(2)+"%"}/>
       <Stat icon={Activity} label="Toplam İşlem" value={paper?.totalTrades??trades.length} detail={(paper?.winRate==null?"Henüz kapanan işlem yok":paper.winRate.toFixed(1)+"% kazanma")}/>
     </div>
-    <div className="notice"><ListFilter size={17}/><div><b>Sanal işlem defteri.</b> Her kapanan işlem ayrı olarak kaydediliyor. Gerçek borsaya hiçbir emir gönderilmiyor.</div></div>
-    <section className="card tableCard"><div className="head"><div><small>TÜM KAPANAN İŞLEMLER / SON 200</small><h2>İşlem Geçmişi</h2></div><span className="tag">{paper?.totalTrades??trades.length} toplam işlem</span></div><div className="tableWrap"><table><thead><tr><th>ZAMAN</th><th>PARİTE</th><th>SKOR</th><th>BORSA</th><th>GİRİŞ</th><th>ÇIKIŞ</th><th>NET K/Z</th><th>SÜRE</th><th>SONUÇ</th></tr></thead><tbody>{trades.slice(0,200).map(t=><tr key={t.id}><td>{fmtDate(t.closedAt)}</td><td><b>{t.symbol}</b></td><td><Score n={t.score}/></td><td>{t.exchange}</td><td>{price(t.entryPrice)}</td><td>{price(t.exitPrice)}</td><td className={t.netPnl>0?"positive":"negative"}>{Number(t.netPnl||0).toFixed(3)} TL</td><td>{Number(t.holdingMinutes||0).toFixed(0)} dk</td><td>{t.reason==="TP_1PCT"?"%1 KÂR":"-%0.8 ZARAR"}</td></tr>)}</tbody></table></div></section>
+    {error&&<div className="notice"><RefreshCw size={17}/><div><b>İşlem geçmişi:</b> {error}</div></div>}\n    <div className="notice"><ListFilter size={17}/><div><b>Sanal işlem defteri.</b> Her kapanan işlem ayrı olarak kaydediliyor. Gerçek borsaya hiçbir emir gönderilmiyor.</div></div>
+    <section className="card tableCard"><div className="head"><div><small>TÜM KAPANAN İŞLEMLER</small><h2>İşlem Geçmişi</h2></div><span className="tag">{trades.length} kayıt yüklendi</span></div><div className="tableWrap"><table><thead><tr><th>ZAMAN</th><th>PARİTE</th><th>SKOR</th><th>BORSA</th><th>GİRİŞ</th><th>ÇIKIŞ</th><th>NET K/Z</th><th>SÜRE</th><th>SONUÇ</th></tr></thead><tbody>{trades.slice(0,200).map(t=><tr key={t.id}><td>{fmtDate(t.closedAt)}</td><td><b>{t.symbol}</b></td><td><Score n={t.score}/></td><td>{t.exchange}</td><td>{price(t.entryPrice)}</td><td>{price(t.exitPrice)}</td><td className={t.netPnl>0?"positive":"negative"}>{Number(t.netPnl||0).toFixed(3)} TL</td><td>{Number(t.holdingMinutes||0).toFixed(0)} dk</td><td>{t.reason==="TP_1PCT"?"%1 KÂR":"-%0.8 ZARAR"}</td></tr>)}</tbody></table></div></section>
   </>;
 }
 
