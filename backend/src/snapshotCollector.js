@@ -378,50 +378,170 @@ function buildOpportunity(m) {
 }
 
 async function runPaper(previous, markets, now) {
-  const state = previous || { initialBalance: 1000, balance: 1000, positions: [], trades: [], lastRunAt: null };
+  const state = previous || {
+    initialBalance: 1000,
+    balance: 1000,
+    positions: [],
+    trades: [],
+    totalTrades: 0,
+    wins: 0,
+    losses: 0,
+    realizedPnl: 0,
+    peakEquity: 1000,
+    maxDrawdownPct: 0,
+    equityHistory: [],
+    lastRunAt: null
+  };
+
+  state.initialBalance = num(state.initialBalance) ?? 1000;
+  state.balance = num(state.balance) ?? state.initialBalance;
+  state.positions = Array.isArray(state.positions) ? state.positions : [];
+  state.trades = Array.isArray(state.trades) ? state.trades : [];
+  state.equityHistory = Array.isArray(state.equityHistory) ? state.equityHistory : [];
+
   const map = new Map(markets.map(m => [m.symbol, m]));
+  const closedTrades = [];
   const remaining = [];
-  const closed = [];
 
-  for (const p of state.positions || []) {
+  for (const p of state.positions) {
     const m = map.get(p.symbol);
-    const exit = m?.bid ?? m?.last;
-    if (!Number.isFinite(exit)) { remaining.push(p); continue; }
-    const changePct = ((exit - p.entryPrice) / p.entryPrice) * 100;
-    if (changePct >= 2 || changePct <= -0.8) {
-      const gross = (exit - p.entryPrice) * p.quantity;
-      const fees = p.entryPrice * p.quantity * p.feeRate + exit * p.quantity * p.feeRate;
-      const netPnl = gross - fees;
-      state.balance += p.quoteCost + netPnl;
-      closed.push({ ...p, exitPrice: exit, netPnl, closedAt: now, reason: changePct >= 2 ? "TP_2PCT" : "SL_0_8PCT" });
-    } else remaining.push(p);
-  }
-  state.positions = remaining;
-  state.trades = [...closed, ...(state.trades || [])].slice(0, 200);
+    const venue = m?.exchangeData?.[p.exchange];
+    const exit = num(venue?.bid) ?? num(m?.bid) ?? num(m?.last);
 
-  const candidates = markets.filter(m => m.opportunity?.actionable && m.activeExchangeCount >= 3)
+    if (!Number.isFinite(exit)) {
+      remaining.push(p);
+      continue;
+    }
+
+    const changePct = ((exit - p.entryPrice) / p.entryPrice) * 100;
+    const hitTp = changePct >= 1;
+    const hitSl = changePct <= -0.8;
+
+    if (!hitTp && !hitSl) {
+      remaining.push(p);
+      continue;
+    }
+
+    const gross = (exit - p.entryPrice) * p.quantity;
+    const entryFee = p.entryPrice * p.quantity * p.feeRate;
+    const exitFee = exit * p.quantity * p.feeRate;
+    const fees = entryFee + exitFee;
+    const netPnl = gross - fees;
+
+    state.balance += p.quoteCost + netPnl;
+    state.realizedPnl += netPnl;
+    state.totalTrades += 1;
+    if (netPnl > 0) state.wins += 1;
+    else state.losses += 1;
+
+    const trade = {
+      ...p,
+      exitPrice: exit,
+      grossPnl: gross,
+      fees,
+      netPnl,
+      returnPct: p.quoteCost > 0 ? (netPnl / p.quoteCost) * 100 : 0,
+      closedAt: now,
+      holdingMinutes: Math.max(0, (now - p.openedAt) / 60000),
+      reason: hitTp ? "TP_1PCT" : "SL_0_8PCT"
+    };
+
+    closedTrades.push(trade);
+    state.trades.unshift(trade);
+  }
+
+  state.positions = remaining;
+  state.trades = state.trades.slice(0, 200);
+
+  const candidates = markets
+    .filter(m =>
+      m.score >= 82 &&
+      m.activeExchangeCount >= 3 &&
+      Number(m.quoteVolume24h || 0) >= 10_000_000 &&
+      Number(m.spreadPct ?? 999) <= 0.30
+    )
     .sort((a, b) => b.score - a.score);
+
+  // Sequential paper trading: every new opportunity can use 10% of
+  // currently available cash. No daily trade-count limit.
   for (const m of candidates) {
-    if (state.positions.length >= 2) break;
     if (state.positions.some(p => p.symbol === m.symbol)) continue;
-    const entry = m.ask ?? m.last;
-    if (!Number.isFinite(entry) || entry <= 0) continue;
-    const quoteCost = state.balance * 0.15;
-    if (quoteCost < 1) continue;
+
+    const venues = Object.entries(m.exchangeData || {})
+      .map(([exchange, data]) => ({ exchange, ...data }))
+      .filter(v => Number.isFinite(v.ask) && v.ask > 0 && Number.isFinite(v.bid) && v.bid > 0);
+
+    if (!venues.length) continue;
+
+    const entryVenue = venues.reduce((a, b) =>
+      (b.quoteVolume24h || 0) > (a.quoteVolume24h || 0) ? b : a
+    );
+    const entry = entryVenue.ask;
+    const availableCash = state.balance;
+    const quoteCost = availableCash * 0.10;
+
+    if (!Number.isFinite(entry) || entry <= 0 || quoteCost < 1) continue;
+
     const feeRate = 0.001;
     const quantity = quoteCost / (entry * (1 + feeRate));
-    state.balance -= quoteCost;
+    const actualCost = quantity * entry;
+    const entryFee = actualCost * feeRate;
+    const totalReserved = actualCost + entryFee;
+
+    if (totalReserved > state.balance) continue;
+
+    state.balance -= totalReserved;
     state.positions.push({
-      id: `paper-${m.symbol}-${now}`, symbol: m.symbol, exchange: m.opportunity.bestBuy.exchange,
-      entryPrice: entry, quantity, quoteCost, feeRate, score: m.score, openedAt: now
+      id: `paper-${m.symbol}-${now}`,
+      symbol: m.symbol,
+      exchange: entryVenue.exchange,
+      entryPrice: entry,
+      quantity,
+      quoteCost: actualCost,
+      feeRate,
+      entryFee,
+      score: m.score,
+      signal: m.signal,
+      reasons: m.reasons,
+      openedAt: now
     });
   }
 
-  state.lastRunAt = now;
-  const openValue = state.positions.reduce((sum, p) => sum + p.quantity * (map.get(p.symbol)?.last ?? p.entryPrice), 0);
+  const openValue = state.positions.reduce((sum, p) => {
+    const m = map.get(p.symbol);
+    const venue = m?.exchangeData?.[p.exchange];
+    const mark = num(venue?.bid) ?? num(m?.bid) ?? p.entryPrice;
+    return sum + p.quantity * mark;
+  }, 0);
+
   state.equity = state.balance + openValue;
   state.returnPct = ((state.equity - state.initialBalance) / state.initialBalance) * 100;
-  return state;
+  state.peakEquity = Math.max(num(state.peakEquity) ?? state.initialBalance, state.equity);
+  const drawdownPct = state.peakEquity > 0
+    ? ((state.peakEquity - state.equity) / state.peakEquity) * 100
+    : 0;
+  state.maxDrawdownPct = Math.max(num(state.maxDrawdownPct) ?? 0, drawdownPct);
+  state.winRate = state.totalTrades > 0 ? (state.wins / state.totalTrades) * 100 : null;
+  state.averageTradePnl = state.totalTrades > 0 ? state.realizedPnl / state.totalTrades : null;
+  state.availableCash = state.balance;
+  state.openPositionValue = openValue;
+  state.positionSizePct = 10;
+  state.takeProfitPct = 1;
+  state.stopLossPct = -0.8;
+  state.maxConcurrentPositions = null;
+  state.mode = "PAPER_ONLY";
+  state.lastRunAt = now;
+
+  state.equityHistory.push({
+    ts: now,
+    equity: state.equity,
+    cash: state.balance,
+    openValue,
+    realizedPnl: state.realizedPnl
+  });
+  state.equityHistory = state.equityHistory.slice(-2000);
+
+  return { state, closedTrades };
 }
 
 function compact(m) {
@@ -513,7 +633,11 @@ async function main() {
   for (const m of markets) m.opportunity = buildOpportunity(m);
   const now = Date.now();
   const previous = await firebase.read("public", "paperState");
-  const paper = await runPaper(previous?.payload ? JSON.parse(previous.payload) : null, markets, now);
+  const paperResult = await runPaper(previous?.payload ? JSON.parse(previous.payload) : null, markets, now);
+  const paper = paperResult.state;
+  for (const trade of paperResult.closedTrades) {
+    await firebase.recordPaperTrade(trade);
+  }
   const previousAnalytics = await firebase.read("public", "analyticsState");
   const analytics = buildAnalytics(previousAnalytics?.payload || null, markets, now);
 

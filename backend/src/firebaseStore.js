@@ -135,6 +135,22 @@ class FirebaseStore {
     return this.write("paperTrades", id, { ...trade, id }, false);
   }
 
+  async readPaperTrades(limit = 200) {
+    if (!this.enabled || !this.db) return [];
+    try {
+      const snapshot = await this.db
+        .collection("paperTrades")
+        .orderBy("closedAt", "desc")
+        .limit(limit)
+        .get();
+      return snapshot.docs.map(doc => doc.data());
+    } catch (error) {
+      this.writeErrors += 1;
+      console.error("Paper trade history read failed:", error.message);
+      return [];
+    }
+  }
+
   async writeDailySummary(date, summary) {
     return this.write("dailyStats", date, summary, true);
   }
