@@ -99,7 +99,9 @@ export default function App(){
   const [tab,setTab]=useState("Ana Sayfa");
   const [data,setData]=useState(null);
   const [market,setMarket]=useState(null);
-  const [history,setHistory]=useState([]);\n  const [paperTrades,setPaperTrades]=useState([]);\n  const [paperTradesError,setPaperTradesError]=useState(null);
+  const [history,setHistory]=useState([]);
+  const [paperTrades,setPaperTrades]=useState([]);
+  const [paperTradesError,setPaperTradesError]=useState(null);
   const [historyError,setHistoryError]=useState(null);
   const [error,setError]=useState(null);
 
@@ -117,6 +119,19 @@ export default function App(){
     const id=setInterval(load,60000);
     return()=>{alive=false;clearInterval(id)};
   },[market?.symbol]);
+
+  useEffect(()=>{
+    let alive=true;
+    const loadPaperTrades=async()=>{
+      try{
+        const rows=await fetchPaperTrades();
+        if(alive){setPaperTrades(rows);setPaperTradesError(null);}
+      }catch(e){if(alive)setPaperTradesError(e.message);}
+    };
+    loadPaperTrades();
+    const id=setInterval(loadPaperTrades,300000);
+    return()=>{alive=false;clearInterval(id)};
+  },[]);
 
   useEffect(()=>{
     let alive=true;
@@ -160,7 +175,7 @@ export default function App(){
   </div>;
 }
 
-function Dashboard({data,market,selectMarket}){
+function Dashboard({data,market,selectMarket,paperTrades}){
   const a=data?.analytics24h,s=a?.summary||{},paper=data?.paper||{},trades=paper.trades||[];
   return <>
     <PaperHeader paper={paper}/>
@@ -384,8 +399,8 @@ function ScoreChart({points,symbol}){
 
 function Row({label,value,width}){return <div className="riskRow"><div><span>{label}</span><b>{value}</b></div><div className="bar"><i style={{width:Math.max(0,Math.min(100,width||0))+"%"}}/></div></div>;}
 
-function Trades({paper}){
-  const trades=paper?.trades||[];
+function Trades({paper,paperTrades,paperTradesError}){
+  const trades=paperTrades?.length?paperTrades:(paper?.trades||[]);
   return <>
     <div className="stats">
       <Stat icon={Wallet} label="Güncel Kasa" value={(paper?.equity??1000).toFixed(2)+" TL"} detail={"Başlangıç 1.000 TL"}/>
@@ -393,7 +408,8 @@ function Trades({paper}){
       <Stat icon={TrendingUp} label="Net Kâr/Zarar" value={(paper?.realizedPnl??0).toFixed(2)+" TL"} detail={(paper?.returnPct??0).toFixed(2)+"%"}/>
       <Stat icon={Activity} label="Toplam İşlem" value={paper?.totalTrades??trades.length} detail={(paper?.winRate==null?"Henüz kapanan işlem yok":paper.winRate.toFixed(1)+"% kazanma")}/>
     </div>
-    {error&&<div className="notice"><RefreshCw size={17}/><div><b>İşlem geçmişi:</b> {error}</div></div>}\n    <div className="notice"><ListFilter size={17}/><div><b>Sanal işlem defteri.</b> Her kapanan işlem ayrı olarak kaydediliyor. Gerçek borsaya hiçbir emir gönderilmiyor.</div></div>
+    {paperTradesError&&<div className="notice"><RefreshCw size={17}/><div><b>İşlem geçmişi:</b> {paperTradesError}</div></div>}
+    <div className="notice"><ListFilter size={17}/><div><b>Sanal işlem defteri.</b> Her kapanan işlem ayrı olarak kaydediliyor. Gerçek borsaya hiçbir emir gönderilmiyor.</div></div>
     <section className="card tableCard"><div className="head"><div><small>TÜM KAPANAN İŞLEMLER</small><h2>İşlem Geçmişi</h2></div><span className="tag">{trades.length} kayıt yüklendi</span></div><div className="tableWrap"><table><thead><tr><th>ZAMAN</th><th>PARİTE</th><th>SKOR</th><th>BORSA</th><th>GİRİŞ</th><th>ÇIKIŞ</th><th>NET K/Z</th><th>SÜRE</th><th>SONUÇ</th></tr></thead><tbody>{trades.slice(0,200).map(t=><tr key={t.id}><td>{fmtDate(t.closedAt)}</td><td><b>{t.symbol}</b></td><td><Score n={t.score}/></td><td>{t.exchange}</td><td>{price(t.entryPrice)}</td><td>{price(t.exitPrice)}</td><td className={t.netPnl>0?"positive":"negative"}>{Number(t.netPnl||0).toFixed(3)} TL</td><td>{Number(t.holdingMinutes||0).toFixed(0)} dk</td><td>{t.reason==="TP_1PCT"?"%1 KÂR":"-%0.8 ZARAR"}</td></tr>)}</tbody></table></div></section>
   </>;
 }
@@ -427,8 +443,8 @@ function Risk({data}){
 
 function AyarlarPage(){
   return <><div className="notice"><SettingsIcon size={17}/><div><b>Ücretsiz mod.</b> Harici zamanlayıcı + GitHub Actions kullanılıyor; piyasa verileri herkese açık API'lerden geliyor.</div></div><section className="card empty"><SettingsIcon size={24}/><h2>Sistem Ayarları</h2><p>Tarama: 5 dk · Skor geçmişi: 15 dk · Kâr hedefi: +%1 · Zarar kes: -%0,8 · İşlem büyüklüğü: %10 · Kasa: 1.000 TL · Geçmiş: 30 gün.</p></section></>;
-}function Performance({paper}){
-  const trades=paper?.trades||[];
+}function Performance({paper,paperTrades}){
+  const trades=paperTrades?.length?paperTrades:(paper?.trades||[]);
   const wins=trades.filter(t=>t.netPnl>0).length;
   const gp=trades.filter(t=>t.netPnl>0).reduce((s,t)=>s+t.netPnl,0);
   const gl=Math.abs(trades.filter(t=>t.netPnl<0).reduce((s,t)=>s+t.netPnl,0));
