@@ -46,6 +46,7 @@ export default function App(){
 
  const score=useMemo(()=>signalScore(market),[market]);
  const connected=exchangeCount(market)>0;
+ const snapshotAt = market?.updatedAt ? new Date(market.updatedAt) : null;
 
  return <div className="app">
   <aside className={open?'side open':'side'}>
@@ -140,6 +141,9 @@ function ModuleView({tab}){
 
 function DashboardContent({market,scanner=[],score,connected,error,paper}){
  const buy=market?.buyPressurePct;
+ const binance=market?.exchangeData?.binance;
+ const bybit=market?.exchangeData?.bybit;
+ const sourceLabel=binance?.source==='binance-public-rest'?'BINANCE PUBLIC API':binance?'BINANCE':'—';
  const total=market?.flowVolume;
  const status=score>=82?'WATCH':score>=70?'MONITOR':'WAIT';
  const statusClass=score>=82?'good':'mutedTag';
@@ -149,13 +153,13 @@ function DashboardContent({market,scanner=[],score,connected,error,paper}){
   <div className="stats">
    <Stat icon={Wallet} label="Paper Equity" value={(paper?.equity??1000).toFixed(2)+" TL"} detail={(paper?.returnPct??0).toFixed(2)+"% since start"}/>
    <Stat icon={TrendingUp} label="BTC Price" value={fmtPrice(market?.last)} detail={market?.lastTradeAt?new Date(market.lastTradeAt).toLocaleTimeString(): 'Waiting for snapshot'}/>
-   <Stat icon={Gauge} label="Buy Pressure" value={buy==null?'—':buy.toFixed(1)+'%'} detail={total==null?'No trades yet':total.toFixed(4)+' BTC flow'}/>
+   <Stat icon={Gauge} label="Buy Pressure" value={buy==null?'—':buy.toFixed(1)+'%'} detail={total==null?'No Binance trades':total.toFixed(2)+' USDT flow'}/>
    <Stat icon={Signal} label="Signal Score" value={score+' / 100'} detail="Current leader"/>
-   <Stat icon={ShieldCheck} label="Spread" value={fmtPct(market?.spreadPct)} detail={connected?'5-min snapshot':'Disconnected'}/><Stat icon={Activity} label="Exchange Coverage" value={exchangeCount(market)+' / 10'} detail="Cross-exchange feeds"/>
+   <Stat icon={ShieldCheck} label="Spread" value={fmtPct(market?.spreadPct)} detail={connected?'5-min snapshot':'Disconnected'}/><Stat icon={Activity} label="Exchange Coverage" value={exchangeCount(market)+' / 10'} detail="Cross-exchange feeds"/><Stat icon={Signal} label="Primary Feed" value={sourceLabel} detail={bybit?.source==='bybit-public-rest'?'Bybit public API also connected':'Bybit fallback'}/>
   </div>
   <div className="two">
    <section className="card chartCard">
-    <div className="head"><div><small>MARKET SNAPSHOT</small><h2>BTC/USDT</h2></div><span className={connected?'tag good':'tag'}>{connected?'LIVE':'OFFLINE'}</span></div>
+    <div className="head"><div><small>MARKET SNAPSHOT</small><h2>BTC/USDT</h2></div><span className={connected?'tag good':'tag'}>{connected?'LAST SNAPSHOT':'OFFLINE'}</span></div>
     <div className="marketGrid">
       <div><small>LAST</small><strong>{fmtPrice(market?.last)}</strong></div>
       <div><small>BID</small><strong>{fmtPrice(market?.bid)}</strong></div>
@@ -164,7 +168,7 @@ function DashboardContent({market,scanner=[],score,connected,error,paper}){
     </div>
     <div className="flow"><span>Sell flow</span><div><i style={{width:(100-(buy??50))+'%'}}/><b>{buy==null?'—':(100-buy).toFixed(1)+'%'}</b></div><span>Buy flow</span></div>
    </section>
-   <section className="card risk"><div className="head"><div><small>SIGNAL</small><h2>Current Decision</h2></div><Signal size={18}/></div><div className="decision"><Score n={score}/><div><b>{status}</b><span>{market?.signal||'WAIT'} · score is informational only</span></div></div><Row a="Buy pressure" b={buy==null?'—':buy.toFixed(1)+'%'} p={(buy??0)+'%'}/><Row a="Book imbalance" b={market?.weightedImbalancePct==null?'—':market.weightedImbalancePct.toFixed(1)+'%'} p={Math.min(100,Math.abs(market?.weightedImbalancePct??0)*2.5)+'%'}/><Row a="Volume anomaly" b={market?.volumeAnomaly==null?'—':market.volumeAnomaly.toFixed(2)+'x'} p={Math.min(100,(market?.volumeAnomaly??0)*25)+'%'}/><Row a="1m momentum" b={fmtPct(market?.momentumPct1m)} p={Math.min(100,Math.abs(market?.momentumPct1m??0)*100)+'%'}/><Row a="Spread" b={fmtPct(market?.spreadPct)} p={Math.min(100,((market?.spreadPct??0)/0.1)*100)+'%'}/><footer>● {connected?'5-minute snapshot healthy':'Waiting for snapshot'}</footer></section>
+   <section className="card risk"><div className="head"><div><small>SIGNAL</small><h2>Current Decision</h2></div><Signal size={18}/></div><div className="decision"><Score n={score}/><div><b>{status}</b><span>{market?.signal||'WAIT'} · score is informational only</span></div></div><Row a="Buy pressure" b={buy==null?'—':buy.toFixed(1)+'%'} p={(buy??0)+'%'}/><Row a="Book imbalance" b={market?.weightedImbalancePct==null?'—':market.weightedImbalancePct.toFixed(1)+'%'} p={Math.min(100,Math.abs(market?.weightedImbalancePct??0)*2.5)+'%'}/><Row a="Volume anomaly" b={market?.volumeAnomaly==null?'—':market.volumeAnomaly.toFixed(2)+'x'} p={Math.min(100,(market?.volumeAnomaly??0)*25)+'%'}/><Row a="1m momentum" b={fmtPct(market?.momentumPct1m)} p={Math.min(100,Math.abs(market?.momentumPct1m??0)*100)+'%'}/><Row a="Spread" b={fmtPct(market?.spreadPct)} p={Math.min(100,((market?.spreadPct??0)/0.1)*100)+'%'}/><footer>● {connected?'5-minute snapshot healthy · '+(market?.updatedAt?new Date(market.updatedAt).toLocaleString('tr-TR'):''):'Waiting for snapshot'}</footer></section>
   </div>
   <Table title="LIVE SIGNALS" subtitle="Top 100 market-cap scanner" action="Top 100 market cap"><thead><tr><th>PAIR</th><th>SCORE</th><th>BUY PRESSURE</th><th>24H QUOTE VOL</th><th>EXCHANGES</th><th>IMBALANCE</th><th>SPREAD</th><th>STATUS</th></tr></thead><tbody>{scanner.slice(0,10).map(m=>{const s=m.score??0;return <tr key={m.symbol}><td><b>{m.symbol.replace('USDT','/USDT')}</b></td><td><Score n={s}/></td><td>{m.buyPressurePct==null?'—':m.buyPressurePct.toFixed(1)+'%'}</td><td>{m.quoteVolume24h>=1e9?(m.quoteVolume24h/1e9).toFixed(2)+'B':(m.quoteVolume24h/1e6).toFixed(1)+'M'}</td><td>{exchangeCount(m)}/10</td><td>{m.imbalancePct==null?'—':m.imbalancePct.toFixed(1)+'%'}</td><td>{fmtPct(m.spreadPct)}</td><td><label className={'tag '+(s>=82?'good':'')}>{m.signal}</label></td></tr>})}</tbody></Table>
   <Table title="RECENT ACTIVITY" subtitle="Paper Trades" action={(paper?.trades?.length??0)+" trades"}><thead><tr><th>TIME</th><th>PAIR</th><th>SIDE</th><th>ENTRY</th><th>SIZE</th><th>SCORE</th><th>NET P&L</th></tr></thead><tbody>{(paper?.trades?.slice(0,10)??trades).map(t=>{const row=Array.isArray(t)?t:[new Date(t.closedAt).toLocaleTimeString(),t.symbol,t.side,t.entryPrice,t.quantity,t.score,t.netPnl];return <tr key={Array.isArray(t)?t[0]:t.id}><td className="muted">{row[0]}</td><td><b>{row[1]}</b></td><td className="muted">{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td><Score n={row[5]}/></td><td className="muted">{row[6]}</td></tr>})}</tbody></Table>
