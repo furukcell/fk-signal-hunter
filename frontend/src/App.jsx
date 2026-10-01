@@ -11,6 +11,17 @@ function fmtPct(n){return n==null?'—':n.toFixed(3)+'%'}
 function exchangeCount(m){return m?.exchangeCount ?? Object.keys(m?.exchangeData ?? {}).length ?? 0;}
 function signalScore(market){ return market?.score ?? 0; }
 
+const SNAPSHOT_URL = "https://firestore.googleapis.com/v1/projects/fk-signal-hunter/databases/(default)/documents/public/latest";
+
+async function fetchSnapshot() {
+ const res = await fetch(SNAPSHOT_URL, {cache:"no-store"});
+ if(!res.ok) throw new Error("Snapshot unavailable");
+ const doc = await res.json();
+ const raw = doc?.fields?.payload?.stringValue;
+ if(!raw) throw new Error("Snapshot payload missing");
+ return JSON.parse(raw);
+}
+
 export default function App(){
  const [open,setOpen]=useState(false);
  const [tab,setTab]=useState('Dashboard');
@@ -23,17 +34,13 @@ export default function App(){
   let alive=true;
   const load=async()=>{
    try{
-    const res=await fetch('/api/market/scanner');
-    if(!res.ok)throw new Error('Market scanner unavailable');
-    const data=await res.json();
+    const data=await fetchSnapshot();
     const btc=data.markets?.find(m=>m.symbol==='BTCUSDT') ?? data.markets?.[0] ?? null;
-    const paperRes=await fetch('/api/paper');
-    const paperData=paperRes.ok?await paperRes.json():null;
-    if(alive){setScanner(data.markets ?? []);setMarket(btc);setPaper(paperData);setError(null);}
+    if(alive){setScanner(data.markets ?? []);setMarket(btc);setPaper(data.paper ?? null);setError(null);}
    }catch(err){if(alive)setError(err.message);}
   };
   load();
-  const id=setInterval(load,1000);
+  const id=setInterval(load,60000);
   return()=>{alive=false;clearInterval(id)};
  },[]);
 
@@ -60,9 +67,8 @@ function ModuleView({tab}){
  const runValidation=async()=>{
   setWfLoading(true);
   try{
-   const r=await fetch('/api/walk-forward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:{baseOptions:{entryDelayMs:10000,maxHoldMs:15*60*1000,cooldownMs:60*1000,slippageBps:5}}})});
-   const d=await r.json();
-   if(r.ok)setWf(d); else setWf({error:d.error||'Validation failed'});
+   await fetchSnapshot();
+   setWf({message:"Historical snapshots are collecting every 5 minutes. Walk-forward validation will be enabled after enough history exists."});
   }catch(e){setWf({error:e.message});}
   finally{setWfLoading(false);}
  };
@@ -70,12 +76,16 @@ function ModuleView({tab}){
   let alive=true;
   const load=async()=>{
    try{
-    const path=tab==='Signals'?'/api/signals':tab==='Risk'?'/api/data-health':'/api/paper';
-    const r=await fetch(path);
-    if(r.ok){const d=await r.json();if(alive)setData(d);}
+    const d=await fetchSnapshot();
+    const mapped=tab==='Signals'
+      ? {signals:d.signals||[]}
+      : tab==='Risk'
+        ? {paper:d.paper||{}, marketsTracked:d.markets?.length||0, marketsWith3PlusExchanges:(d.markets||[]).filter(m=>(m.activeExchangeCount||0)>=3).length, marketCoveragePct:d.markets?.length?((d.markets.filter(m=>(m.activeExchangeCount||0)>=3).length/d.markets.length)*100):0, liveExchanges:d.health?.exchangesWithData||0, healthyExchanges:d.health?.exchangesWithData||0, totalActiveFeeds:(d.markets||[]).reduce((s,m)=>s+(m.activeExchangeCount||0),0), totalExpectedFeeds:(d.markets?.length||0)*10, feedCoveragePct:d.markets?.length?((d.markets.reduce((s,m)=>s+(m.activeExchangeCount||0),0)/(d.markets.length*10))*100):0, exchanges:{}}
+        : d.paper||{};
+    if(alive)setData(mapped);
    }catch{}
   };
-  load(); const id=setInterval(load,2000);
+  load(); const id=setInterval(load,60000);
   return()=>{alive=false;clearInterval(id)};
  },[tab]);
 
@@ -106,7 +116,7 @@ function ModuleView({tab}){
   </section>
   <section className="card">
    <div className="head"><div><small>HISTORICAL VALIDATION</small><h2>Walk-Forward Test</h2></div><button className="linkBtn" onClick={runValidation} disabled={wfLoading}>{wfLoading?'Running…':'Run validation'}</button></div>
-   <p className="muted">7-day training → 1-day unseen test. Parameters are selected only from the training window; test results are out-of-sample.</p>
+   <p className="muted">5-minute snapshots are collected without a paid server. The stored history will be used for out-of-sample validation once enough data exists.</p>
    {wf?.error&&<div className="notice"><RefreshCw size={17}/><div><b>Validation:</b> {wf.error}</div></div>}
    {a&&<div className="stats"><Stat icon={BarChart3} label="Test Windows" value={a.windows} detail={a.skippedWindows+' skipped'}/><Stat icon={TrendingUp} label="Positive Windows" value={(a.positiveWindowRate*100).toFixed(1)+'%'} detail={a.positiveWindows+' windows'}/><Stat icon={Target} label="Avg OOS Return" value={a.averageOutOfSampleReturnPct.toFixed(2)+'%'} detail="Per test window"/><Stat icon={Wallet} label="OOS P&L" value={a.totalOutOfSamplePnl.toFixed(2)+' TL'} detail="Aggregate"/></div>}
    {wf?.result?.windows?.length>0&&<Table title="OUT-OF-SAMPLE WINDOWS" subtitle="Walk-forward" action={wf.result.candidates+' parameter sets'}><thead><tr><th>TEST</th><th>SELECTED</th><th>TRAIN RETURN</th><th>OOS RETURN</th><th>OOS TRADES</th><th>OOS PF</th><th>DRAWDOWN</th></tr></thead><tbody>{wf.result.windows.filter(w=>w.outOfSample).map((w,i)=><tr key={i}><td>{new Date(w.testStart).toLocaleDateString()}</td><td>{w.selected?'S'+w.selected.entryScore+' / TP '+(w.selected.tpPct*100).toFixed(1)+' / SL '+(w.selected.slPct*100).toFixed(1):'—'}</td><td>{w.inSample.returnPct.toFixed(2)}%</td><td>{w.outOfSample.returnPct.toFixed(2)}%</td><td>{w.outOfSample.trades}</td><td>{w.outOfSample.profitFactor==null?'—':w.outOfSample.profitFactor.toFixed(2)}</td><td>{w.outOfSample.maxDrawdownPct.toFixed(2)}%</td></tr>)}</tbody></Table>}
