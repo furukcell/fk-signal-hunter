@@ -171,8 +171,8 @@ function updateEvents(state, markets, now) {
 
 function buildAnalytics(previousRaw, markets, now) {
   const state = readState(previousRaw);
-  addScorePoint(state, markets, now);
   updateEvents(state, markets, now);
+  addScorePoint(state, markets, now);
 
   const analytics = summarize(state.events, markets, now);
   analytics.scorePoints = state.scorePoints;
