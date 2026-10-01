@@ -16,10 +16,10 @@ const SNAPSHOT_URL="https://firestore.googleapis.com/v1/projects/fk-signal-hunte
 
 async function fetchSnapshot(){
   const res=await fetch(SNAPSHOT_URL,{cache:"no-store"});
-  if(!res.ok) throw new Error("Snapshot unavailable");
+  if(!res.ok) throw new Error("Veri alınamadı");
   const doc=await res.json();
   const raw=doc?.fields?.payload?.stringValue;
-  if(!raw) throw new Error("Snapshot payload missing");
+  if(!raw) throw new Error("Veri içeriği bulunamadı");
   return JSON.parse(raw);
 }
 
@@ -69,7 +69,7 @@ export default function App(){
     <main>
       <header><button className="menu" onClick={()=>setOpen(true)}><Menu size={20}/></button><div><small>KİŞİSEL PİYASA SİSTEMİ</small><h1>{tab}</h1></div><div className="actions"><span className="market"><i className={connected?"live":""}/> {connected?"5 dakikalık veri aktif":"Veri bağlantısı yok"}</span><button className="start" disabled><Bot size={15}/> Botu Başlat</button></div></header>
       <section className="content">
-        {error&&<div className="notice"><RefreshCw size={17}/><div><b>Market data:</b> {error}</div></div>}
+        {error&&<div className="notice"><RefreshCw size={17}/><div><b>Piyasa verisi:</b> {error}</div></div>}
         {tab==="Ana Sayfa"&&<Dashboard data={data} market={market} selectMarket={selectMarket}/>}
         {tab==="24 Saatlik Tarama"&&<Scanner analytics={analytics} markets={markets} selectMarket={selectMarket}/>}
         {tab==="Sinyaller"&&<Signals data={data} analytics={analytics}/>}
@@ -92,7 +92,7 @@ function Dashboard({data,market,selectMarket}){
     <div className="stats">
       <Stat icon={Wallet} label="Simülasyon Bakiyesi" value={(data?.paper?.equity??1000).toFixed(2)+" TL"} detail={"Başlangıçtan itibaren"}/>
       <Stat icon={Target} label="24H Fırsat" value={s.totalOpportunities24h??0} detail="Skor ≥ 82"/>
-      <Stat icon={TrendingUp} label="30 Dakika Pozitif" value={pct(s.positiveRate30m)} detail={(s.resolved30m??0)+" resolved"}/>
+      <Stat icon={TrendingUp} label="30 Dakika Pozitif" value={pct(s.positiveRate30m)} detail={(s.ölçüldü30m??0)+" ölçüldü"}/>
       <Stat icon={TrendingUp} label="1 Saat Pozitif" value={pct(s.positiveRate1h)} detail={(s.resolved1h??0)+" resolved"}/>
       <Stat icon={Gauge} label="2 Saat Ortalaması" value={pct(s.avgReturn2h,3)} detail={(s.resolved2h??0)+" resolved"}/>
     </div>
@@ -100,7 +100,7 @@ function Dashboard({data,market,selectMarket}){
       <section className="card chartCard">
         <div className="head"><div><small>24 SAAT / 15 DK ÖRNEKLEME</small><h2>Skor Geçmişi</h2></div><select value={market?.symbol||""} onChange={e=>selectMarket(e.target.value)}>{(data?.markets||[]).map(m=><option key={m.symbol} value={m.symbol}>{m.symbol.replace("USDT","/USDT")}</option>)}</select></div>
         <ScoreChart points={a?.scorePoints||[]} symbol={market?.symbol}/>
-        <div className="chartLegend"><span><i/> {market?.symbol?.replace("USDT","/USDT")||"—"} score</span><span>FIRSAT ≥ 82</span></div>
+        <div className="chartLegend"><span><i/> {market?.symbol?.replace("USDT","/USDT")||"—"} skor</span><span>FIRSAT ≥ 82</span></div>
       </section>
       <section className="card risk">
         <div className="head"><div><small>SEÇİLİ COIN</small><h2>{market?.symbol?.replace("USDT","/USDT")||"—"}</h2></div><Score n={score}/></div>
@@ -119,13 +119,13 @@ function Dashboard({data,market,selectMarket}){
 function Scanner({analytics,markets,selectMarket}){
   const rows=useMemo(()=>[...(analytics?.markets||[])].sort((a,b)=>(b.opportunities24h-a.opportunities24h)||((b.score||0)-(a.score||0))),[analytics]);
   return <>
-    <div className="notice"><TrendingUp size={17}/><div><b>24H Scanner.</b> Buradaki “fırsat” bir gerçek emir değil; skorun 82 eşiğini yukarı kesmesi. Sonuçlar daha sonra ölçülüyor.</div></div>
+    <div className="notice"><TrendingUp size={17}/><div><b>24 Saatlik Tarama.</b> Buradaki “fırsat” bir gerçek emir değil; skorun 82 eşiğini yukarı kesmesi. Sonuçlar daha sonra ölçülüyor.</div></div>
     <div className="stats">
-      <Stat icon={Target} label="Coin sayısı" value={markets.length} detail="Universe"/>
-      <Stat icon={Signal} label="Fırsat" value={analytics?.summary?.totalOpportunities24h??0} detail="Last 24h"/>
-      <Stat icon={TrendingUp} label="Avg 30M" value={pct(analytics?.summary?.avgReturn30m,3)} detail="Resolved"/>
-      <Stat icon={TrendingUp} label="Avg 1H" value={pct(analytics?.summary?.avgReturn1h,3)} detail="Resolved"/>
-      <Stat icon={TrendingUp} label="Avg 2H" value={pct(analytics?.summary?.avgReturn2h,3)} detail="Resolved"/>
+      <Stat icon={Target} label="Coin sayısı" value={markets.length} detail="Kapsam"/>
+      <Stat icon={Signal} label="Fırsat" value={analytics?.summary?.totalOpportunities24h??0} detail="Son 24 saat"/>
+      <Stat icon={TrendingUp} label="Ortalama 30 DK" value={pct(analytics?.summary?.avgReturn30m,3)} detail="Ölçülen"/>
+      <Stat icon={TrendingUp} label="Ortalama 1 SAAT" value={pct(analytics?.summary?.avgReturn1h,3)} detail="Ölçülen"/>
+      <Stat icon={TrendingUp} label="Ortalama 2 SAAT" value={pct(analytics?.summary?.avgReturn2h,3)} detail="Ölçülen"/>
     </div>
     <section className="card tableCard"><div className="head"><div><small>İLK 100 COIN / SON 24 SAAT</small><h2>Fırsat Sonuçları</h2></div><span className="tag">5 DK VERİ</span></div><div className="tableWrap"><table><thead><tr><th>COIN</th><th>SKOR</th><th>FIRSAT</th><th>30 DK ORT.</th><th>1 SAAT ORT.</th><th>2 SAAT ORT.</th><th>2 SAAT POZİTİF</th><th>BORSALAR</th></tr></thead><tbody>{rows.map(r=><tr key={r.symbol} onClick={()=>selectMarket(r.symbol)} className="clickRow"><td><b>{r.symbol.replace("USDT","/USDT")}</b></td><td><Score n={r.score}/></td><td>{r.opportunities24h}</td><td>{pct(r.avgReturn30m,3)}</td><td>{pct(r.avgReturn1h,3)}</td><td>{pct(r.avgReturn2h,3)}</td><td>{pct(r.positiveRate2h,1)}</td><td>{marketCount(markets.find(m=>m.symbol===r.symbol))}/10</td></tr>)}</tbody></table></div></section>
   </>;
@@ -144,7 +144,7 @@ function OpportunityTable({analytics,limit=20}){
 
 function ScoreChart({points,symbol}){
   const values=(points||[]).map(p=>({ts:p.ts,v:p.markets?.find(m=>m.s===symbol)?.score})).filter(x=>x.v!=null);
-  if(values.length<2) return <div className="chartEmpty">24 saatlik grafik doluyor. Sistem 15 dakikada bir score noktası saklıyor.</div>;
+  if(values.length<2) return <div className="chartEmpty">24 saatlik grafik doluyor. Sistem 15 dakikada bir skor noktası saklıyor.</div>;
   const w=900,h=220,pad=24,min=0,max=100;
   const xy=(d,i)=>({x:pad+(i/(values.length-1))*(w-pad*2),y:h-pad-(d.v/100)*(h-pad*2)});
   const line=values.map((d,i)=>{const q=xy(d,i);return (i?"L":"M")+q.x.toFixed(1)+" "+q.y.toFixed(1)}).join(" ");
@@ -170,15 +170,15 @@ function Trades({paper}){
 
 function ScoreEngine(){
   const rows=[
-    ["24H momentum","±10","Fiyatın son 24 saatteki yönü"],
-    ["Likidite","+8 / +4","24H quote volume"],
+    ["24 saatlik momentum","±10","Fiyatın son 24 saatteki yönü"],
+    ["Likidite","+8 / +4","24 saatlik işlem hacmi"],
     ["Borsa kapsamı","+7 / +4 / -8","Kaç borsada sağlıklı fiyat var"],
     ["Fiyat dağılımı","±4","Borsalar arası fiyat farkı"],
-    ["Order-book","±12","Top depth bid/ask dengesi"],
+    ["Emir defteri","±12","Top depth bid/ask dengesi"],
     ["Spread","+4 / -5","İşlem maliyeti / likidite kalitesi"],
-    ["Buy pressure","±10","Binance son işlem örneklemindeki alıcı baskısı"]
+    ["Alıcı baskısı","±10","Binance son işlem örneklemindeki alıcı baskısı"]
   ];
-  return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “WATCH fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>CURRENT FORMULA</small><h2>Score Engine</h2></div><span className="tag">PROTOTYPE</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu score tek başına kullanılmayacak. 5M momentum, volume anomaly, gerçek trade-flow penceresi, slippage, volatilite, cross-exchange teyidi ve risk blokları ayrı Entry Engine olarak test edilecek.</p></section></>;
+  return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “WATCH fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>MEVCUT FORMÜL</small><h2>Skor Motoru</h2></div><span className="tag">PROTOTİP</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu skor tek başına kullanılmayacak. 5 dakikalık momentum, hacim anomalisi, gerçek işlem akışı, kayma, volatilite, borsalar arası teyit ve risk kuralları ayrı bir giriş motorunda test edilecek.</p></section></>;
 }
 
 function Risk({data}){
@@ -214,26 +214,4 @@ function SettingsPage(){
     <section className="card empty"><BarChart3 size={24}/><h2>Kasa ve performans</h2><p>Başlangıç 1.000 TL. Her işlemde mevcut nakdin %10'u kullanılıyor. Kâr hedefi %1, zarar kesme seviyesi -%0,8. İşlem sayısına günlük limit yok. Komisyon simülasyona dahil.</p></section>
     <section className="card tableCard"><div className="head"><div><small>SON KAPANAN İŞLEMLER</small><h2>İşlem Sonuçları</h2></div><span className="tag">{trades.length} kayıt</span></div><div className="tableWrap"><table><thead><tr><th>PARİTE</th><th>SKOR</th><th>NET K/Z</th><th>GETİRİ</th><th>ÇIKIŞ</th></tr></thead><tbody>{trades.slice(0,50).map(t=><tr key={t.id}><td><b>{t.symbol}</b></td><td><Score n={t.score}/></td><td className={t.netPnl>0?"positive":"negative"}>{Number(t.netPnl||0).toFixed(3)} TL</td><td>{Number(t.returnPct||0).toFixed(3)}%</td><td>{t.reason==="TP_1PCT"?"Kâr hedefi":"Zarar kes"}</td></tr>)}</tbody></table></div></section>
   </>;
-}
-
-function ScoreEngine(){
-  const rows=[
-    ["24H momentum","±10","Fiyatın son 24 saatteki yönü"],
-    ["Likidite","+8 / +4","24H quote volume"],
-    ["Borsa kapsamı","+7 / +4 / -8","Kaç borsada sağlıklı fiyat var"],
-    ["Fiyat dağılımı","±4","Borsalar arası fiyat farkı"],
-    ["Order-book","±12","Top depth bid/ask dengesi"],
-    ["Spread","+4 / -5","İşlem maliyeti / likidite kalitesi"],
-    ["Buy pressure","±10","Binance son işlem örneklemindeki alıcı baskısı"]
-  ];
-  return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “WATCH fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>CURRENT FORMULA</small><h2>Score Engine</h2></div><span className="tag">PROTOTYPE</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu score tek başına kullanılmayacak. 5M momentum, volume anomaly, gerçek trade-flow penceresi, slippage, volatilite, cross-exchange teyidi ve risk blokları ayrı Entry Engine olarak test edilecek.</p></section></>;
-}
-
-function Risk({data}){
-  const h=data?.health||{};
-  return <><div className="stats"><Stat icon={ShieldCheck} label="Open positions" value={(data?.paper?.positions?.length??0)+" / 2"} detail="Paper limit"/><Stat icon={Activity} label="Exchange feeds" value={(h.exchangesWithData??0)+"/10"} detail="Snapshot coverage"/><Stat icon={Signal} label="Depth markets" value={h.depthMarkets??0} detail="Top-depth enriched"/><Stat icon={Bot} label="Mode" value="PAPER" detail="No real orders"/></div><section className="card empty"><ShieldCheck size={24}/><h2>Risk controls</h2><p>Gerçek para modu kapalı. Mevcut paper engine 1,000 TL başlangıç, %15 pozisyon ve maksimum 2 açık pozisyon ile çalışıyor.</p></section></>;
-}
-
-function SettingsPage(){
-  return <><div className="notice"><Settings size={17}/><div><b>Free mode.</b> Snapshot scheduler dış cron + GitHub Actions kullanıyor; market verileri public API'lerden geliyor.</div></div><section className="card empty"><Settings size={24}/><h2>System settings</h2><p>Snapshot: 5 dk · Score history: 15 dk · Fırsat horizon: 30 dk / 1 saat / 2 saat · Retention: 30 gün.</p></section></>;
 }
