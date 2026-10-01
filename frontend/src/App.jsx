@@ -314,7 +314,7 @@ function moneyCompact(n){
   return x.toFixed(2);
 }
 
-function MarketDetail({market,history}){
+function MarketDetail({market,history,scorePoints}){
   const series=history.slice(-288);
   const exchangeRows=Object.entries(market.exchangeData||{})
     .map(([exchange,v])=>({exchange,...v}))
@@ -338,6 +338,11 @@ function MarketDetail({market,history}){
       <div className="head"><div><small>5 DAKİKALIK AKIŞ</small><h3>24 saat boyunca para girişi / çıkışı</h3></div><span className="tag">{series.length} nokta</span></div>
       <FlowChart history={series}/>
     </div>
+    <div className="flowChartCard">
+      <div className="head"><div><small>24 SAATLİK SKOR GEÇMİŞİ</small><h3>{market.symbol.replace("USDT","/USDT")} skorunun son 24 saati</h3></div><span className="tag">15 DK KAYIT</span></div>
+      <ScoreChart points={scorePoints} symbol={market.symbol}/>
+    </div>
+
 
     <div className="exchangeTable">
       <div className="head"><div><small>10 BORSADAN GÜNCEL FİYATLAR</small><h3>Borsa karşılaştırması</h3></div><span className="tag">ANLIK TARAMA</span></div>
