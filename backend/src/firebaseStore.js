@@ -71,6 +71,34 @@ class FirebaseStore {
     return this.write("signals", signal.id, signal, false);
   }
 
+  async read(collection, id) {
+    if (!this.enabled || !this.db) return null;
+    try {
+      const snapshot = await this.db.collection(collection).doc(id).get();
+      return snapshot.exists ? snapshot.data() : null;
+    } catch (error) {
+      this.writeErrors += 1;
+      console.error("Firebase read failed:", error.message);
+      return null;
+    }
+  }
+
+  async writePublicSnapshot(payload) {
+    return this.write("public", "latest", {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      payload: JSON.stringify(payload)
+    }, true);
+  }
+
+  async writeHistoricalSnapshot(timestamp, payload) {
+    return this.write("historicalSnapshots", String(timestamp), {
+      schemaVersion: 1,
+      generatedAt: new Date(timestamp).toISOString(),
+      payload: JSON.stringify(payload)
+    }, false);
+  }
+
   async recordSignalOutcome(id, outcome) {
     return this.write("signals", id, {
       outcome,
