@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useState} from "react";
-import {Activity,BarChart3,Bot,Gauge,LayoutDashboard,ListFilter,Menu,RefreshCw,Ayarlar,ShieldCheck,Signal,Target,TrendingUp,Wallet,X} from "lucide-react";
+import {Activity,BarChart3,Bot,Gauge,LayoutDashboard,ListFilter,Menu,RefreshCw,Settings as SettingsIcon,ShieldCheck,Signal,Target,TrendingUp,Wallet,X} from "lucide-react";
 
 const nav=[
   ["Ana Sayfa",LayoutDashboard],
@@ -9,7 +9,7 @@ const nav=[
   ["Performans",BarChart3],
   ["Skor Motoru",Gauge],
   ["Risk",ShieldCheck],
-  ["Ayarlar",Ayarlar]
+  ["Ayarlar",SettingsIcon]
 ];
 
 const SNAPSHOT_URL="https://firestore.googleapis.com/v1/projects/fk-signal-hunter/databases/(default)/documents/public/latest";
@@ -237,7 +237,7 @@ function Risk({data}){
 }
 
 function AyarlarPage(){
-  return <><div className="notice"><Ayarlar size={17}/><div><b>Ücretsiz mod.</b> Harici zamanlayıcı + GitHub Actions kullanılıyor; piyasa verileri herkese açık API'lerden geliyor.</div></div><section className="card empty"><Ayarlar size={24}/><h2>Sistem Ayarları</h2><p>Tarama: 5 dk · Skor geçmişi: 15 dk · Kâr hedefi: +%1 · Zarar kes: -%0,8 · İşlem büyüklüğü: %10 · Kasa: 1.000 TL · Geçmiş: 30 gün.</p></section></>;
+  return <><div className="notice"><SettingsIcon size={17}/><div><b>Ücretsiz mod.</b> Harici zamanlayıcı + GitHub Actions kullanılıyor; piyasa verileri herkese açık API'lerden geliyor.</div></div><section className="card empty"><SettingsIcon size={24}/><h2>Sistem Ayarları</h2><p>Tarama: 5 dk · Skor geçmişi: 15 dk · Kâr hedefi: +%1 · Zarar kes: -%0,8 · İşlem büyüklüğü: %10 · Kasa: 1.000 TL · Geçmiş: 30 gün.</p></section></>;
 }function Performance({paper}){
   const trades=paper?.trades||[];
   const wins=trades.filter(t=>t.netPnl>0).length;
