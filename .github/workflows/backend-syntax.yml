@@ -34,6 +34,7 @@ jobs:
       - name: Verify Firebase Admin credentials
         run: |
           node --input-type=module -e 'import { FirebaseStore } from "./src/firebaseStore.js"; const store = new FirebaseStore(); if (!store.enabled) { console.error("Firebase credentials were not initialized"); process.exit(1); } console.log("Firebase Admin credentials initialized successfully");'
+      # Firestore smoke test requires the Cloud Firestore API to be enabled.
       - name: Test Firestore read/write/delete
         run: |
           node --input-type=module -e 'import { FirebaseStore } from "./src/firebaseStore.js"; const store = new FirebaseStore(); await store.smokeTest(); console.log("Firestore smoke test passed: write, read and delete");'
