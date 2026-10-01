@@ -8,6 +8,7 @@ on:
       - "frontend/**"
       - "firebase.json"
       - ".firebaserc"
+      - ".github/workflows/deploy-firebase.yml"
   workflow_dispatch:
 
 permissions:
