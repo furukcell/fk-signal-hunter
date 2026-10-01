@@ -708,6 +708,12 @@ The Docker dashboard proxy uses the internal `backend:3001` service address auto
 
 
 
+## 🌐 Live Dashboard
+
+**FK Signal Hunter Dashboard:** https://fk-signal-hunter.web.app
+
+The dashboard is deployed on Firebase Hosting and reads the latest public market snapshot from Firestore.
+
 ## Free 5-Minute Mode
 
 The production-safe default is now a **no-paid-server** mode:
@@ -724,12 +730,12 @@ The production-safe default is now a **no-paid-server** mode:
 
 ### Cost safety
 
-The repository is public, so standard GitHub-hosted runners are free. Firebase remains on the Spark plan; the Firestore rules expose only `public/latest` for dashboard reads and deny client writes. If a Spark quota is exceeded, Firebase shuts that service off for the rest of the billing period rather than automatically charging a bill.
+The repository is public, so standard GitHub-hosted runners are free. Firebase remains on the Spark plan; the Firestore rules expose only `public/latest` for dashboard reads and deny client writes. If a Spark quota is exceeded, the affected Firebase service can stop serving until the quota period resets; this setup does not add a paid billing method automatically.
 
 ### One-time dashboard deployment
 
 The repository contains `.github/workflows/deploy-firebase.yml`.
 
-Run **Deploy Free Firebase Panel** once from GitHub Actions. It builds the React dashboard, deploys Firebase Hosting and publishes the Firestore rules using the existing `FIREBASE_SERVICE_ACCOUNT_JSON` repository secret.
+Run **Deploy Free Firebase Panel** from GitHub Actions when the dashboard needs to be redeployed. It builds the React dashboard and deploys Firebase Hosting using the existing `FIREBASE_SERVICE_ACCOUNT_JSON` repository secret. Firestore rules are managed separately.
 
 After that, the scheduled collector updates Firestore every five minutes and the same dashboard automatically sees the newest snapshot.
