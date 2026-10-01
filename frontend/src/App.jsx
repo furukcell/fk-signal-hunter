@@ -430,6 +430,8 @@ function ScoreEngine(){
     ["Mikro fiyat","+6 / -6","En iyi alış/satış miktarlarının ima ettiği fiyat yönü"],
     ["Borsa teyidi","+8 / -6","Kaç borsada fiyat aynı yönde hareket ediyor"],
     ["Satış emilimi","+8 / -8","Güçlü satışa rağmen fiyatın düşmemesi"],
+    ["Büyük emir dengesi","+7 / -7","L5 içindeki büyük görünen emirlerin alıcı/satıcı dengesi"],
+    ["Derinlik değişimi","+6 / -6","İki tarama arasındaki L5 alış/satış derinliği değişimi"],
     ["Spread / likidite","+9 / -7","İşlem maliyetinin ve likiditenin uygunluğu"],
     ["Piyasa genişliği","+4 / -4","İlk 100 coin'in kaçının aynı anda yükseldiği"],
     ["BTC piyasa rejimi","+3 / -8","Altcoin işlemlerinde BTC'nin kısa vadeli yön filtresi"]
