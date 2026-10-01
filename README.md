@@ -706,3 +706,30 @@ docker compose up
 The Docker dashboard proxy uses the internal `backend:3001` service address automatically.
 
 
+
+
+## Free 5-Minute Mode
+
+The production-safe default is now a **no-paid-server** mode:
+
+- GitHub Actions runs the REST collector every 5 minutes.
+- Public market APIs are used; no exchange API keys are required.
+- CCXT normalizes REST market data from Binance, Coinbase, Upbit, OKX, Bybit, Bitget, Gate, KuCoin, MEXC and HTX.
+- The top 100 market-cap universe is collected when CoinGecko is available; the collector falls back to exchange data if it is not.
+- Ticker data is collected for the tracked universe and order-book depth is enriched for the highest-volume 20 markets.
+- The latest compact snapshot and historical snapshots are stored in Firestore.
+- Paper trading starts at 1,000 TL and remains completely disconnected from real exchange orders.
+- The dashboard reads the latest public snapshot directly from Firestore; it does not require a running backend server.
+- Cloud Run, Cloud Functions, VPS hosting and exchange trading keys are **not required** for this mode.
+
+### Cost safety
+
+The repository is public, so standard GitHub-hosted runners are free. Firebase remains on the Spark plan; the Firestore rules expose only `public/latest` for dashboard reads and deny client writes. If a Spark quota is exceeded, Firebase shuts that service off for the rest of the billing period rather than automatically charging a bill.
+
+### One-time dashboard deployment
+
+The repository contains `.github/workflows/deploy-firebase.yml`.
+
+Run **Deploy Free Firebase Panel** once from GitHub Actions. It builds the React dashboard, deploys Firebase Hosting and publishes the Firestore rules using the existing `FIREBASE_SERVICE_ACCOUNT_JSON` repository secret.
+
+After that, the scheduled collector updates Firestore every five minutes and the same dashboard automatically sees the newest snapshot.
