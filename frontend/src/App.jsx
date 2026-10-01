@@ -301,7 +301,7 @@ function Scanner({analytics,markets,history,historyError,selectMarket}){
       </div>
     </section>
 
-    {selected&&<MarketDetail market={selected} history={selectedHistory}/>}
+    {selected&&<MarketDetail market={selected} history={selectedHistory} scorePoints={analytics?.scorePoints||[]}/>}
   </>;
 }
 
