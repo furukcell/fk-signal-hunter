@@ -28,3 +28,41 @@
 .scoreChart{padding:0 17px 8px}.scoreChart svg{width:100%;height:220px;display:block;overflow:visible}.scoreChart .line{fill:none;stroke:#c9d1dc;stroke-width:2.5}.scoreChart .area{fill:rgba(150,160,175,.08)}.scoreChart .threshold{stroke:#75683f;stroke-dasharray:5 5;stroke-width:1}.scoreChart circle{fill:#dfe5ed}.chartAxis{display:flex;justify-content:space-between;color:#566173;font-size:8px;padding:0 4px}.chartLegend{display:flex;justify-content:space-between;color:#6d7889;font-size:9px;padding:4px 17px 15px}.chartLegend i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#c9d1dc;margin-right:5px}.chartEmpty{height:220px;display:grid;place-items:center;color:#687385;font-size:10px;padding:20px;text-align:center}
 .formulaGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:#1d242e;margin:0 17px 17px}.formulaGrid>div{background:#10151c;padding:14px}.formulaGrid b{display:block;color:#dfe5ed;font-size:11px}.formulaGrid strong{display:block;color:#aeb8c6;font-size:13px;margin:5px 0}.formulaGrid span{display:block;color:#687486;font-size:9px;line-height:1.5}
 @media(max-width:700px){.formulaGrid{grid-template-columns:1fr}.chartCard{min-height:0}}
+
+.paperHero{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:1px;margin-bottom:11px;overflow:hidden;background:#1d242e}
+.paperHero>div{background:#10151c;padding:18px}
+.paperHero small{display:block;color:#697487;font-size:9px;letter-spacing:.1em}
+.paperHero h2{font-size:26px;margin:7px 0 2px;color:#edf2f7}
+.paperHero strong{display:block;font-size:19px;margin-top:9px;color:#e2e8ef}
+.paperHero span{display:block;color:#697487;font-size:9px;margin-top:5px}
+.equityChart{padding:5px 17px 15px}
+.equityChart svg{width:100%;height:240px;display:block}
+.equityChart .line{fill:none;stroke:#cbd3de;stroke-width:3}
+.equityChart .baseline{stroke:#5e563d;stroke-dasharray:5 5}
+.equityChart>div{display:flex;justify-content:space-between;color:#697487;font-size:9px}
+.chartEmpty,.emptySmall{min-height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#6e798a;gap:7px;padding:25px}
+.chartEmpty b,.emptySmall b{color:#dce2ea;font-size:11px}
+.chartEmpty span,.emptySmall span{font-size:9px;max-width:300px;line-height:1.5}
+.positionList,.tradeList{padding:0 17px 14px}
+.position,.tradeRow{display:grid;grid-template-columns:1fr auto;gap:15px;padding:12px 0;border-top:1px solid #1c232d}
+.position>div,.tradeRow>div{display:flex;flex-direction:column;gap:4px}
+.position b,.tradeRow b{font-size:11px;color:#e0e6ee}
+.position span,.tradeRow span{font-size:9px;color:#697487}
+.tradeRow{grid-template-columns:1fr auto auto;align-items:center}
+.tradeRow strong{font-size:11px;min-width:70px;text-align:right}
+.signalBox{display:flex;gap:12px;align-items:center;padding:4px 17px 12px}
+.signalBox>div{display:flex;flex-direction:column;gap:4px}
+.signalBox b{font-size:12px;color:#e1e7ee}
+.signalBox span{font-size:9px;color:#697487;line-height:1.4}
+.miniRow{display:flex;justify-content:space-between;padding:9px 17px;border-top:1px solid #1c232d;font-size:10px}
+.miniRow span{color:#7f8999}.miniRow b{color:#dce2e9}
+.bandGrid,.settingsGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#1d242e;margin:0 17px 17px}
+.bandGrid>div,.settingsGrid>div{background:#10151c;padding:14px;display:flex;flex-direction:column;gap:6px}
+.bandGrid b,.settingsGrid b{color:#dfe5ed;font-size:11px}
+.bandGrid strong,.settingsGrid strong{color:#aeb8c6;font-size:14px}
+.bandGrid span,.settingsGrid span{color:#687486;font-size:9px}
+.bandGrid i{font-style:normal}
+.clickRow{cursor:pointer}.clickRow:hover{background:#141922}
+.linkBtn{background:none;border:0;color:#8490a1;font-size:9px;cursor:pointer}
+@media(max-width:1000px){.paperHero{grid-template-columns:1fr 1fr}.bandGrid,.settingsGrid{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.paperHero{grid-template-columns:1fr}.bandGrid,.settingsGrid{grid-template-columns:1fr}.tradeRow{grid-template-columns:1fr auto}.tradeRow strong{grid-column:2;grid-row:1/3}}
