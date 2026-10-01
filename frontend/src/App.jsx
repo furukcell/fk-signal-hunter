@@ -34,7 +34,7 @@ function marketCount(m){return m?.activeExchangeCount??m?.exchangeCount??0;}
 
 export default function App(){
   const [open,setOpen]=useState(false);
-  const [tab,setTab]=useState("Dashboard");
+  const [tab,setTab]=useState("Ana Sayfa");
   const [data,setData]=useState(null);
   const [market,setMarket]=useState(null);
   const [error,setError]=useState(null);
@@ -104,7 +104,7 @@ function Dashboard({data,market,selectMarket}){
       </section>
       <section className="card risk">
         <div className="head"><div><small>SEÇİLİ COIN</small><h2>{market?.symbol?.replace("USDT","/USDT")||"—"}</h2></div><Score n={score}/></div>
-        <div className="decision"><Score n={score}/><div><b>{score>=82?"WATCH FIRSATI":score>=70?"MONITOR":"WAIT"}</b><span>Bu skor henüz “garantili alım” anlamına gelmez.</span></div></div>
+        <div className="decision"><Score n={score}/><div><b>{score>=82?"FIRSAT":score>=70?"TAKİP":"BEKLE"}</b><span>Bu skor henüz “garantili alım” anlamına gelmez.</span></div></div>
         <Row label="Alıcı baskısı" value={pct(market?.buyPressurePct)} width={market?.buyPressurePct??0}/>
         <Row label="Emir defteri dengesi" value={pct(market?.weightedImbalancePct)} width={Math.min(100,Math.abs(market?.weightedImbalancePct||0)*2.5)}/>
         <Row label="24 saatlik momentum" value={pct(market?.priceChangePct24h)} width={Math.min(100,Math.abs(market?.priceChangePct24h||0)*20)}/>
@@ -149,7 +149,7 @@ function ScoreChart({points,symbol}){
   const xy=(d,i)=>({x:pad+(i/(values.length-1))*(w-pad*2),y:h-pad-(d.v/100)*(h-pad*2)});
   const line=values.map((d,i)=>{const q=xy(d,i);return (i?"L":"M")+q.x.toFixed(1)+" "+q.y.toFixed(1)}).join(" ");
   const area=line+" L "+(w-pad)+" "+(h-pad)+" L "+pad+" "+(h-pad)+" Z";
-  return <div className="scoreChart"><svg viewBox={"0 0 "+w+" "+h}><line x1={pad} x2={w-pad} y1={h-pad-(82/100)*(h-pad*2)} y2={h-pad-(82/100)*(h-pad*2)} className="threshold"/><path d={area} className="area"/><path d={line} className="line"/>{values.slice(-1).map((d,i)=>{const q=xy(d,values.length-1);return <circle key={i} cx={q.x} cy={q.y} r="4"/>})}</svg><div className="chartAxis"><span>24s önce</span><span>82 WATCH</span><span>Şimdi</span></div></div>;
+  return <div className="scoreChart"><svg viewBox={"0 0 "+w+" "+h}><line x1={pad} x2={w-pad} y1={h-pad-(82/100)*(h-pad*2)} y2={h-pad-(82/100)*(h-pad*2)} className="threshold"/><path d={area} className="area"/><path d={line} className="line"/>{values.slice(-1).map((d,i)=>{const q=xy(d,values.length-1);return <circle key={i} cx={q.x} cy={q.y} r="4"/>})}</svg><div className="chartAxis"><span>24s önce</span><span>82 FIRSAT</span><span>Şimdi</span></div></div>;
 }
 
 function Row({label,value,width}){return <div className="riskRow"><div><span>{label}</span><b>{value}</b></div><div className="bar"><i style={{width:Math.max(0,Math.min(100,width||0))+"%"}}/></div></div>;}
