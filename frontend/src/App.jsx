@@ -1,178 +1,190 @@
-import {useEffect,useMemo,useState} from 'react';
-import {Activity,BarChart3,Bot,Gauge,LayoutDashboard,ListFilter,Menu,RefreshCw,Settings,ShieldCheck,Signal,Target,TrendingUp,Wallet,X} from 'lucide-react';
+import {useEffect,useMemo,useState} from "react";
+import {Activity,BarChart3,Bot,Gauge,LayoutDashboard,ListFilter,Menu,RefreshCw,Settings,ShieldCheck,Signal,Target,TrendingUp,Wallet,X} from "lucide-react";
 
-const trades=[['--:--:--','BTC/USDT','PAPER','—','—',0,'—']];
-const nav=[['Dashboard',LayoutDashboard],['Signals',Signal],['Trades',ListFilter],['Performance',BarChart3],['Risk',ShieldCheck],['Settings',Settings]];
+const nav=[
+  ["Dashboard",LayoutDashboard],
+  ["24H Scanner",TrendingUp],
+  ["Signals",Signal],
+  ["Trades",ListFilter],
+  ["Performance",BarChart3],
+  ["Score Engine",Gauge],
+  ["Risk",ShieldCheck],
+  ["Settings",Settings]
+];
 
-function Stat({icon:Icon,label,value,detail}){return <div className="card stat"><div className="statIcon"><Icon size={17}/></div><div><small>{label}</small><strong>{value}</strong><em>{detail}</em></div></div>}
-function Score({n}){return <span className={'score '+(n>=85?'high':n>=75?'mid':'low')}>{n}</span>}
-function fmtPrice(n){return n==null?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
-function fmtPct(n){return n==null?'—':n.toFixed(3)+'%'}
-function exchangeCount(m){return m?.exchangeCount ?? Object.keys(m?.exchangeData ?? {}).length ?? 0;}
-function signalScore(market){ return market?.score ?? 0; }
+const SNAPSHOT_URL="https://firestore.googleapis.com/v1/projects/fk-signal-hunter/databases/(default)/documents/public/latest";
 
-const SNAPSHOT_URL = "https://firestore.googleapis.com/v1/projects/fk-signal-hunter/databases/(default)/documents/public/latest";
-
-async function fetchSnapshot() {
- const res = await fetch(SNAPSHOT_URL, {cache:"no-store"});
- if(!res.ok) throw new Error("Snapshot unavailable");
- const doc = await res.json();
- const raw = doc?.fields?.payload?.stringValue;
- if(!raw) throw new Error("Snapshot payload missing");
- return JSON.parse(raw);
+async function fetchSnapshot(){
+  const res=await fetch(SNAPSHOT_URL,{cache:"no-store"});
+  if(!res.ok) throw new Error("Snapshot unavailable");
+  const doc=await res.json();
+  const raw=doc?.fields?.payload?.stringValue;
+  if(!raw) throw new Error("Snapshot payload missing");
+  return JSON.parse(raw);
 }
+
+function Stat({icon:Icon,label,value,detail}){
+  return <div className="card stat"><div className="statIcon"><Icon size={17}/></div><div><small>{label}</small><strong>{value}</strong><em>{detail}</em></div></div>;
+}
+function Score({n}){const x=Number(n||0);return <span className={"score "+(x>=82?"high":x>=70?"mid":"low")}>{x}</span>;}
+function pct(n,d=1){return n==null?"—":Number(n).toFixed(d)+"%";}
+function price(n){return n==null?"—":Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4});}
+function fmtDate(ts){return ts?new Date(ts).toLocaleString("tr-TR",{hour:"2-digit",minute:"2-digit"}):"—";}
+function marketCount(m){return m?.activeExchangeCount??m?.exchangeCount??0;}
 
 export default function App(){
- const [open,setOpen]=useState(false);
- const [tab,setTab]=useState('Dashboard');
- const [market,setMarket]=useState(null);
- const [scanner,setScanner]=useState([]);
- const [error,setError]=useState(null);
- const [paper,setPaper]=useState(null);
+  const [open,setOpen]=useState(false);
+  const [tab,setTab]=useState("Dashboard");
+  const [data,setData]=useState(null);
+  const [market,setMarket]=useState(null);
+  const [error,setError]=useState(null);
 
- useEffect(()=>{
-  let alive=true;
-  const load=async()=>{
-   try{
-    const data=await fetchSnapshot();
-    const btc=data.markets?.find(m=>m.symbol==='BTCUSDT') ?? data.markets?.[0] ?? null;
-    if(alive){setScanner(data.markets ?? []);setMarket(btc);setPaper(data.paper ?? null);setError(null);}
-   }catch(err){if(alive)setError(err.message);}
-  };
-  load();
-  const id=setInterval(load,60000);
-  return()=>{alive=false;clearInterval(id)};
- },[]);
+  useEffect(()=>{
+    let alive=true;
+    const load=async()=>{
+      try{
+        const d=await fetchSnapshot();
+        const preferred=market?.symbol;
+        const next=d.markets?.find(x=>x.symbol===preferred)??d.markets?.[0]??null;
+        if(alive){setData(d);setMarket(next);setError(null);}
+      }catch(e){if(alive)setError(e.message);}
+    };
+    load();
+    const id=setInterval(load,60000);
+    return()=>{alive=false;clearInterval(id)};
+  },[market?.symbol]);
 
- const score=useMemo(()=>signalScore(market),[market]);
- const connected=exchangeCount(market)>0;
+  const markets=data?.markets??[];
+  const analytics=data?.analytics24h;
+  const connected=Number(data?.health?.exchangesWithData||0)>0;
 
- return <div className="app">
-  <aside className={open?'side open':'side'}>
-   <div className="brand"><div className="mark"><Target size={18}/></div><div><b>FK SIGNAL HUNTER</b><span>Market Intelligence</span></div><button className="close" onClick={()=>setOpen(false)}><X size={18}/></button></div>
-   <nav>{nav.map(([name,Icon])=><button className={tab===name?'active':''} key={name} onClick={()=>{setTab(name);setOpen(false)}}><Icon size={17}/><span>{name}</span></button>)}</nav>
-   <div className="bottom"><div className="paper"><i/> <div><b>PAPER MODE</b><span>Real money disabled</span></div></div><div className="engine"><Bot size={16}/> Engine <b>ONLINE</b></div></div>
-  </aside>
-  <main>
-   <header><button className="menu" onClick={()=>setOpen(true)}><Menu size={20}/></button><div><small>PERSONAL TRADING SYSTEM</small><h1>{tab}</h1></div><div className="actions"><span className="market"><i className={connected?'live':''}/> {connected?'5-minute snapshot online':'Snapshot disconnected'}</span><button className="start" disabled><Bot size={15}/> Start Bot</button></div></header>
-   <section className="content">{tab==='Dashboard'?<DashboardContent market={market} scanner={scanner} score={score} connected={connected} error={error} paper={paper}/>:<ModuleView tab={tab}/>}</section>
-  </main>
- </div>
+  const selectMarket=s=>setMarket(markets.find(m=>m.symbol===s)||market);
+
+  return <div className="app">
+    <aside className={open?"side open":"side"}>
+      <div className="brand"><div className="mark"><Target size={18}/></div><div><b>FK SIGNAL HUNTER</b><span>Market Intelligence</span></div><button className="close" onClick={()=>setOpen(false)}><X size={18}/></button></div>
+      <nav>{nav.map(([name,Icon])=><button className={tab===name?"active":""} key={name} onClick={()=>{setTab(name);setOpen(false)}}><Icon size={17}/><span>{name}</span></button>)}</nav>
+      <div className="bottom"><div className="paper"><i/> <div><b>PAPER MODE</b><span>Real money disabled</span></div></div><div className="engine"><Bot size={16}/> Engine <b>ONLINE</b></div></div>
+    </aside>
+    <main>
+      <header><button className="menu" onClick={()=>setOpen(true)}><Menu size={20}/></button><div><small>PERSONAL TRADING SYSTEM</small><h1>{tab}</h1></div><div className="actions"><span className="market"><i className={connected?"live":""}/> {connected?"5-minute snapshot online":"Snapshot disconnected"}</span><button className="start" disabled><Bot size={15}/> Start Bot</button></div></header>
+      <section className="content">
+        {error&&<div className="notice"><RefreshCw size={17}/><div><b>Market data:</b> {error}</div></div>}
+        {tab==="Dashboard"&&<Dashboard data={data} market={market} selectMarket={selectMarket}/>}
+        {tab==="24H Scanner"&&<Scanner analytics={analytics} markets={markets} selectMarket={selectMarket}/>}
+        {tab==="Signals"&&<Signals data={data} analytics={analytics}/>}
+        {tab==="Trades"&&<Trades paper={data?.paper}/>}
+        {tab==="Performance"&&<Performance paper={data?.paper}/>}
+        {tab==="Score Engine"&&<ScoreEngine/>}
+        {tab==="Risk"&&<Risk data={data}/>}
+        {tab==="Settings"&&<SettingsPage/>}
+      </section>
+    </main>
+  </div>;
 }
 
-function ModuleView({tab}){
- const [data,setData]=useState(null);
- const [wf,setWf]=useState(null);
- const [wfLoading,setWfLoading]=useState(false);
- const runValidation=async()=>{
-  setWfLoading(true);
-  try{
-   await fetchSnapshot();
-   setWf({message:"Historical snapshots are collecting every 5 minutes. Walk-forward validation will be enabled after enough history exists."});
-  }catch(e){setWf({error:e.message});}
-  finally{setWfLoading(false);}
- };
- useEffect(()=>{
-  let alive=true;
-  const load=async()=>{
-   try{
-    const d=await fetchSnapshot();
-    const mapped=tab==='Signals'
-      ? {signals:d.signals||[]}
-      : tab==='Risk'
-        ? {paper:d.paper||{}, marketsTracked:d.markets?.length||0, marketsWith3PlusExchanges:(d.markets||[]).filter(m=>(m.activeExchangeCount||0)>=3).length, marketCoveragePct:d.markets?.length?((d.markets.filter(m=>(m.activeExchangeCount||0)>=3).length/d.markets.length)*100):0, liveExchanges:d.health?.exchangesWithData||0, healthyExchanges:d.health?.exchangesWithData||0, totalActiveFeeds:(d.markets||[]).reduce((s,m)=>s+(m.activeExchangeCount||0),0), totalExpectedFeeds:(d.markets?.length||0)*10, feedCoveragePct:d.markets?.length?((d.markets.reduce((s,m)=>s+(m.activeExchangeCount||0),0)/(d.markets.length*10))*100):0, exchanges:{}}
-        : d.paper||{};
-    if(alive)setData(mapped);
-   }catch{}
-  };
-  load(); const id=setInterval(load,60000);
-  return()=>{alive=false;clearInterval(id)};
- },[tab]);
-
- if(tab==='Signals'){
-  return <><div className="notice"><Signal size={17}/><div><b>5-minute signal radar.</b> Cross-exchange confirmation, buy pressure, spread and opportunity data.</div></div>
-   <Table title="SIGNAL RADAR" subtitle="5-min snapshot" action={(data?.signals?.length??0)+" candidates"}><thead><tr><th>PAIR</th><th>SCORE</th><th>BUY PRESSURE</th><th>EXCHANGES</th><th>CONSENSUS</th><th>EDGE</th><th>STATUS</th></tr></thead><tbody>{(data?.signals??[]).slice(0,20).map(m=><tr key={m.symbol}><td><b>{m.symbol.replace('USDT','/USDT')}</b></td><td><Score n={m.score}/></td><td>{m.buyPressurePct==null?'—':m.buyPressurePct.toFixed(1)+'%'}</td><td>{m.activeExchangeCount??m.exchangeCount}/10</td><td>{(m.buyConsensus*100).toFixed(0)}%</td><td>{m.opportunity?.estimatedNetCrossExchangeEdgePct==null?'—':m.opportunity.estimatedNetCrossExchangeEdgePct.toFixed(3)+'%'}</td><td><label className={'tag '+(m.signal==='WATCH'?'good':'')}>{m.signal}</label></td></tr>)}</tbody></Table></>;
- }
- if(tab==='Trades'){
-  return <><div className="notice"><ListFilter size={17}/><div><b>Paper trades.</b> No real orders are enabled.</div></div><Table title="PAPER TRADES" subtitle="Execution log" action={(data?.trades?.length??0)+" trades"}><thead><tr><th>TIME</th><th>PAIR</th><th>EXCHANGE</th><th>ENTRY</th><th>EXIT</th><th>NET P&L</th><th>REASON</th></tr></thead><tbody>{(data?.trades??[]).slice(0,50).map(t=><tr key={t.id}><td>{new Date(t.closedAt).toLocaleTimeString()}</td><td><b>{t.symbol}</b></td><td>{t.exchange}</td><td>{Number(t.entryPrice).toFixed(4)}</td><td>{Number(t.exitPrice).toFixed(4)}</td><td>{Number(t.netPnl).toFixed(2)}</td><td>{t.reason}</td></tr>)}</tbody></Table></>;
- }
- if(tab==='Performance'){
-  const trades=data?.trades??[];
-  const wins=trades.filter(t=>t.netPnl>0).length;
-  const pf=(()=>{const gp=trades.filter(t=>t.netPnl>0).reduce((s,t)=>s+t.netPnl,0);const gl=Math.abs(trades.filter(t=>t.netPnl<0).reduce((s,t)=>s+t.netPnl,0));return gl?gp/gl:null})();
-  const a=wf?.result?.aggregate;
-  const signalStats=data?.signalStats||{};
-  const maxDd=Number(data?.maxDrawdownPct||0);
-  const conversion=signalStats.actionable?((signalStats.entries/signalStats.actionable)*100):0;
-  return <><div className="stats"><Stat icon={Wallet} label="Equity" value={(data?.equity??1000).toFixed(2)+' TL'} detail="Paper"/><Stat icon={TrendingUp} label="Return" value={(data?.returnPct??0).toFixed(2)+'%'} detail="Since start"/><Stat icon={Target} label="Win Rate" value={trades.length?((wins/trades.length)*100).toFixed(1)+'%':'—'} detail={trades.length+' closed trades'}/><Stat icon={Gauge} label="Profit Factor" value={pf==null?'—':pf.toFixed(2)} detail="Net after modeled costs"/><Stat icon={ShieldCheck} label="Max Drawdown" value={maxDd.toFixed(2)+'%'} detail="Peak-to-equity"/></div>
-  <section className="card">
-   <div className="head"><div><small>PAPER EXECUTION QUALITY</small><h2>Live Performance</h2></div><span className="tag">PAPER</span></div>
-   <div className="stats">
-    <Stat icon={Activity} label="Actionable Signals" value={signalStats.actionable??0} detail="Observed since restart"/>
-    <Stat icon={Target} label="Signal → Entry" value={conversion.toFixed(1)+'%'} detail={(signalStats.entries??0)+' entries'}/>
-    <Stat icon={ShieldCheck} label="Rejected" value={signalStats.rejected??0} detail="Risk / cooldown / duplicate"/>
-    <Stat icon={TrendingUp} label="Equity Samples" value={data?.equityHistory?.length??0} detail="Recent history"/>
-   </div>
-  </section>
-  <section className="card">
-   <div className="head"><div><small>HISTORICAL VALIDATION</small><h2>Walk-Forward Test</h2></div><button className="linkBtn" onClick={runValidation} disabled={wfLoading}>{wfLoading?'Running…':'Run validation'}</button></div>
-   <p className="muted">5-minute snapshots are collected without a paid server. The stored history will be used for out-of-sample validation once enough data exists.</p>
-   {wf?.error&&<div className="notice"><RefreshCw size={17}/><div><b>Validation:</b> {wf.error}</div></div>}
-   {a&&<div className="stats"><Stat icon={BarChart3} label="Test Windows" value={a.windows} detail={a.skippedWindows+' skipped'}/><Stat icon={TrendingUp} label="Positive Windows" value={(a.positiveWindowRate*100).toFixed(1)+'%'} detail={a.positiveWindows+' windows'}/><Stat icon={Target} label="Avg OOS Return" value={a.averageOutOfSampleReturnPct.toFixed(2)+'%'} detail="Per test window"/><Stat icon={Wallet} label="OOS P&L" value={a.totalOutOfSamplePnl.toFixed(2)+' TL'} detail="Aggregate"/></div>}
-   {wf?.result?.windows?.length>0&&<Table title="OUT-OF-SAMPLE WINDOWS" subtitle="Walk-forward" action={wf.result.candidates+' parameter sets'}><thead><tr><th>TEST</th><th>SELECTED</th><th>TRAIN RETURN</th><th>OOS RETURN</th><th>OOS TRADES</th><th>OOS PF</th><th>DRAWDOWN</th></tr></thead><tbody>{wf.result.windows.filter(w=>w.outOfSample).map((w,i)=><tr key={i}><td>{new Date(w.testStart).toLocaleDateString()}</td><td>{w.selected?'S'+w.selected.entryScore+' / TP '+(w.selected.tpPct*100).toFixed(1)+' / SL '+(w.selected.slPct*100).toFixed(1):'—'}</td><td>{w.inSample.returnPct.toFixed(2)}%</td><td>{w.outOfSample.returnPct.toFixed(2)}%</td><td>{w.outOfSample.trades}</td><td>{w.outOfSample.profitFactor==null?'—':w.outOfSample.profitFactor.toFixed(2)}</td><td>{w.outOfSample.maxDrawdownPct.toFixed(2)}%</td></tr>)}</tbody></Table>}
-  </section></>;
- }
- if(tab==='Risk'){
-  const h=data||{};
-  return <><div className="stats">
-   <Stat icon={ShieldCheck} label="Open Positions" value={(h.paper?.openPositions??0)+' / '+(h.paper?.maxOpenPositions??2)} detail="Paper risk limit"/>
-   <Stat icon={Activity} label="Feed Coverage" value={(h.feedCoveragePct??0).toFixed(1)+'%'} detail={(h.totalActiveFeeds??0)+' / '+(h.totalExpectedFeeds??0)+' active feeds'}/>
-   <Stat icon={Signal} label="Market Coverage" value={(h.marketCoveragePct??0).toFixed(1)+'%'} detail={(h.marketsWith3PlusExchanges??0)+' / '+(h.marketsTracked??0)+' markets'}/>
-   <Stat icon={BarChart3} label="Live Exchanges" value={(h.liveExchanges??0)+' / 10'} detail={(h.healthyExchanges??0)+' with ≥80% coverage'}/>
-  </div>
-  <section className="card tableCard"><div className="head"><div><small>DATA QUALITY</small><h2>Exchange Feed Health</h2></div><span className="tag good">LIVE</span></div>
-   <div className="tableWrap"><table><thead><tr><th>EXCHANGE</th><th>STATUS</th><th>ACTIVE</th><th>EXPECTED</th><th>COVERAGE</th><th>MESSAGES</th><th>RECONNECTS</th><th>ERRORS</th><th>LAST DATA</th></tr></thead><tbody>{Object.entries(h.exchanges||{}).map(([name,x])=><tr key={name}><td><b>{name.toUpperCase()}</b></td><td><label className={'tag '+(x.status==='live'&&x.coveragePct>=80?'good':'')}>{x.status}</label></td><td>{x.activeFeeds}</td><td>{x.expectedFeeds}</td><td>{Number(x.coveragePct||0).toFixed(1)}%</td><td>{Number(x.messageCount||0).toLocaleString()}</td><td>{x.reconnectCount||0}</td><td>{x.errorCount||0}</td><td>{x.lastDataAt?new Date(x.lastDataAt).toLocaleTimeString():'—'}</td></tr>)}</tbody></table></div>
-  </section>
-  <section className="card empty"><ShieldCheck size={24}/><h2>Risk engine + data health</h2><p>Position sizing and loss controls remain paper-only. Feed coverage is shown separately so backtests and signals are not trusted blindly when market data is incomplete.</p></section></>;
- }
- return <><div className="notice"><Settings size={17}/><div><b>System settings.</b> Current paper parameters are intentionally conservative and are not validated trading rules.</div></div><div className="card empty"><Settings size={24}/><h2>Settings module</h2><p>Current defaults: 1,000 TL paper balance, 15% position size, max 2 positions, +2% TP, -0.8% SL.</p></div></>;
-}
-
-function DashboardContent({market,scanner=[],score,connected,error,paper}){
- const buy=market?.buyPressurePct;
- const binance=market?.exchangeData?.binance;
- const bybit=market?.exchangeData?.bybit;
- const sourceLabel=binance?.source==='binance-public-rest'?'BINANCE PUBLIC API':binance?'BINANCE':'—';
- const total=market?.flowVolume;
- const status=score>=82?'WATCH':score>=70?'MONITOR':'WAIT';
- const statusClass=score>=82?'good':'mutedTag';
- return <>
-  <div className="notice"><Activity size={17}/><div><b>Paper trading only.</b> Public market data is connected; no exchange account or real order capability is enabled.</div></div>
-  {error&&<div className="notice"><RefreshCw size={17}/><div><b>Market API:</b> {error}. Wait for the next 5-minute market snapshot.</div></div>}
-  <div className="stats">
-   <Stat icon={Wallet} label="Paper Equity" value={(paper?.equity??1000).toFixed(2)+" TL"} detail={(paper?.returnPct??0).toFixed(2)+"% since start"}/>
-   <Stat icon={TrendingUp} label="BTC Price" value={fmtPrice(market?.last)} detail={market?.lastTradeAt?new Date(market.lastTradeAt).toLocaleTimeString(): 'Waiting for snapshot'}/>
-   <Stat icon={Gauge} label="Buy Pressure" value={buy==null?'—':buy.toFixed(1)+'%'} detail={total==null?'No Binance trades':total.toFixed(2)+' USDT flow'}/>
-   <Stat icon={Signal} label="Signal Score" value={score+' / 100'} detail="Current leader"/>
-   <Stat icon={ShieldCheck} label="Spread" value={fmtPct(market?.spreadPct)} detail={connected?'5-min snapshot':'Disconnected'}/><Stat icon={Activity} label="Exchange Coverage" value={exchangeCount(market)+' / 10'} detail="Cross-exchange feeds"/><Stat icon={Signal} label="Primary Feed" value={sourceLabel} detail={bybit?.source==='bybit-public-rest'?'Bybit public API also connected':'Bybit fallback'}/>
-  </div>
-  <div className="two">
-   <section className="card chartCard">
-    <div className="head"><div><small>MARKET SNAPSHOT</small><h2>BTC/USDT</h2></div><span className={connected?'tag good':'tag'}>{connected?'LAST SNAPSHOT':'OFFLINE'}</span></div>
-    <div className="marketGrid">
-      <div><small>LAST</small><strong>{fmtPrice(market?.last)}</strong></div>
-      <div><small>BID</small><strong>{fmtPrice(market?.bid)}</strong></div>
-      <div><small>ASK</small><strong>{fmtPrice(market?.ask)}</strong></div>
-      <div><small>TRADES</small><strong>{market?.trades??0}</strong></div>
+function Dashboard({data,market,selectMarket}){
+  const a=data?.analytics24h;
+  const s=a?.summary||{};
+  const score=market?.score??0;
+  return <>
+    <div className="notice"><Activity size={17}/><div><b>Bu ekran artık sadece “şu an”ı göstermiyor.</b> Her 5 dakikada tüm 100 coin taranıyor; 82+ skor eşiğini geçen fırsatlar kaydediliyor ve 30 dk / 1 saat / 2 saat sonraki fiyat sonucu ölçülüyor.</div></div>
+    <div className="stats">
+      <Stat icon={Wallet} label="Paper Equity" value={(data?.paper?.equity??1000).toFixed(2)+" TL"} detail={(data?.paper?.returnPct??0).toFixed(2)+"% since start"}/>
+      <Stat icon={Target} label="24H Fırsat" value={s.totalOpportunities24h??0} detail="Score ≥ 82"/>
+      <Stat icon={TrendingUp} label="30M Pozitif" value={pct(s.positiveRate30m)} detail={(s.resolved30m??0)+" resolved"}/>
+      <Stat icon={TrendingUp} label="1H Pozitif" value={pct(s.positiveRate1h)} detail={(s.resolved1h??0)+" resolved"}/>
+      <Stat icon={Gauge} label="2H Ortalama" value={pct(s.avgReturn2h,3)} detail={(s.resolved2h??0)+" resolved"}/>
     </div>
-    <div className="flow"><span>Sell flow</span><div><i style={{width:(100-(buy??50))+'%'}}/><b>{buy==null?'—':(100-buy).toFixed(1)+'%'}</b></div><span>Buy flow</span></div>
-   </section>
-   <section className="card risk"><div className="head"><div><small>SIGNAL</small><h2>Current Decision</h2></div><Signal size={18}/></div><div className="decision"><Score n={score}/><div><b>{status}</b><span>{market?.signal||'WAIT'} · score is informational only</span></div></div><Row a="Buy pressure" b={buy==null?'—':buy.toFixed(1)+'%'} p={(buy??0)+'%'}/><Row a="Book imbalance" b={market?.weightedImbalancePct==null?'—':market.weightedImbalancePct.toFixed(1)+'%'} p={Math.min(100,Math.abs(market?.weightedImbalancePct??0)*2.5)+'%'}/><Row a="Volume anomaly" b={market?.volumeAnomaly==null?'—':market.volumeAnomaly.toFixed(2)+'x'} p={Math.min(100,(market?.volumeAnomaly??0)*25)+'%'}/><Row a="1m momentum" b={fmtPct(market?.momentumPct1m)} p={Math.min(100,Math.abs(market?.momentumPct1m??0)*100)+'%'}/><Row a="Spread" b={fmtPct(market?.spreadPct)} p={Math.min(100,((market?.spreadPct??0)/0.1)*100)+'%'}/><footer>● {connected?'5-minute snapshot healthy · '+(market?.updatedAt?new Date(market.updatedAt).toLocaleString('tr-TR'):''):'Waiting for snapshot'}</footer></section>
-  </div>
-  <Table title="LIVE SIGNALS" subtitle="Top 100 market-cap scanner" action="Top 100 market cap"><thead><tr><th>PAIR</th><th>SCORE</th><th>BUY PRESSURE</th><th>24H QUOTE VOL</th><th>EXCHANGES</th><th>IMBALANCE</th><th>SPREAD</th><th>STATUS</th></tr></thead><tbody>{scanner.slice(0,10).map(m=>{const s=m.score??0;return <tr key={m.symbol}><td><b>{m.symbol.replace('USDT','/USDT')}</b></td><td><Score n={s}/></td><td>{m.buyPressurePct==null?'—':m.buyPressurePct.toFixed(1)+'%'}</td><td>{m.quoteVolume24h>=1e9?(m.quoteVolume24h/1e9).toFixed(2)+'B':(m.quoteVolume24h/1e6).toFixed(1)+'M'}</td><td>{exchangeCount(m)}/10</td><td>{m.imbalancePct==null?'—':m.imbalancePct.toFixed(1)+'%'}</td><td>{fmtPct(m.spreadPct)}</td><td><label className={'tag '+(s>=82?'good':'')}>{m.signal}</label></td></tr>})}</tbody></Table>
-  <Table title="RECENT ACTIVITY" subtitle="Paper Trades" action={(paper?.trades?.length??0)+" trades"}><thead><tr><th>TIME</th><th>PAIR</th><th>SIDE</th><th>ENTRY</th><th>SIZE</th><th>SCORE</th><th>NET P&L</th></tr></thead><tbody>{(paper?.trades?.slice(0,10)??trades).map(t=>{const row=Array.isArray(t)?t:[new Date(t.closedAt).toLocaleTimeString(),t.symbol,t.side,t.entryPrice,t.quantity,t.score,t.netPnl];return <tr key={Array.isArray(t)?t[0]:t.id}><td className="muted">{row[0]}</td><td><b>{row[1]}</b></td><td className="muted">{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td><Score n={row[5]}/></td><td className="muted">{row[6]}</td></tr>})}</tbody></Table>
- </>
+    <div className="two">
+      <section className="card chartCard">
+        <div className="head"><div><small>24 SAAT / 15 DK ÖRNEKLEME</small><h2>Score Timeline</h2></div><select value={market?.symbol||""} onChange={e=>selectMarket(e.target.value)}>{(data?.markets||[]).map(m=><option key={m.symbol} value={m.symbol}>{m.symbol.replace("USDT","/USDT")}</option>)}</select></div>
+        <ScoreChart points={a?.scorePoints||[]} symbol={market?.symbol}/>
+        <div className="chartLegend"><span><i/> {market?.symbol?.replace("USDT","/USDT")||"—"} score</span><span>WATCH ≥ 82</span></div>
+      </section>
+      <section className="card risk">
+        <div className="head"><div><small>SEÇİLİ COIN</small><h2>{market?.symbol?.replace("USDT","/USDT")||"—"}</h2></div><Score n={score}/></div>
+        <div className="decision"><Score n={score}/><div><b>{score>=82?"WATCH FIRSATI":score>=70?"MONITOR":"WAIT"}</b><span>Bu skor henüz “garantili alım” anlamına gelmez.</span></div></div>
+        <Row label="Buy pressure" value={pct(market?.buyPressurePct)} width={market?.buyPressurePct??0}/>
+        <Row label="Order-book imbalance" value={pct(market?.weightedImbalancePct)} width={Math.min(100,Math.abs(market?.weightedImbalancePct||0)*2.5)}/>
+        <Row label="24H momentum" value={pct(market?.priceChangePct24h)} width={Math.min(100,Math.abs(market?.priceChangePct24h||0)*20)}/>
+        <Row label="Spread" value={pct(market?.spreadPct,3)} width={Math.min(100,(market?.spreadPct||0)*500)}/>
+        <footer>Son snapshot: {fmtDate(data?.generatedAt)}</footer>
+      </section>
+    </div>
+    <OpportunityTable analytics={a} limit={10}/>
+  </>;
 }
 
-function Row({a,b,p}){return <div className="riskRow"><span>{a}</span><b>{b}</b><div className="bar"><i style={{width:p}}/></div></div>}
-function Table({title,subtitle,action,children}){return <section className="card tableCard"><div className="head"><div><small>{subtitle}</small><h2>{title}</h2></div><button className="linkBtn">{action}</button></div><div className="tableWrap"><table>{children}</table></div></section>}
+function Scanner({analytics,markets,selectMarket}){
+  const rows=useMemo(()=>[...(analytics?.markets||[])].sort((a,b)=>(b.opportunities24h-a.opportunities24h)||((b.score||0)-(a.score||0))),[analytics]);
+  return <>
+    <div className="notice"><TrendingUp size={17}/><div><b>24H Scanner.</b> Buradaki “fırsat” bir gerçek emir değil; skorun 82 eşiğini yukarı kesmesi. Sonuçlar daha sonra ölçülüyor.</div></div>
+    <div className="stats">
+      <Stat icon={Target} label="Coin sayısı" value={markets.length} detail="Universe"/>
+      <Stat icon={Signal} label="Fırsat" value={analytics?.summary?.totalOpportunities24h??0} detail="Last 24h"/>
+      <Stat icon={TrendingUp} label="Avg 30M" value={pct(analytics?.summary?.avgReturn30m,3)} detail="Resolved"/>
+      <Stat icon={TrendingUp} label="Avg 1H" value={pct(analytics?.summary?.avgReturn1h,3)} detail="Resolved"/>
+      <Stat icon={TrendingUp} label="Avg 2H" value={pct(analytics?.summary?.avgReturn2h,3)} detail="Resolved"/>
+    </div>
+    <section className="card tableCard"><div className="head"><div><small>100 COIN / SON 24 SAAT</small><h2>Fırsat Sonuçları</h2></div><span className="tag">5 MIN DATA</span></div><div className="tableWrap"><table><thead><tr><th>COIN</th><th>SKOR</th><th>FIRSAT</th><th>30M ORT.</th><th>1H ORT.</th><th>2H ORT.</th><th>2H POZİTİF</th><th>EXCHANGES</th></tr></thead><tbody>{rows.map(r=><tr key={r.symbol} onClick={()=>selectMarket(r.symbol)} className="clickRow"><td><b>{r.symbol.replace("USDT","/USDT")}</b></td><td><Score n={r.score}/></td><td>{r.opportunities24h}</td><td>{pct(r.avgReturn30m,3)}</td><td>{pct(r.avgReturn1h,3)}</td><td>{pct(r.avgReturn2h,3)}</td><td>{pct(r.positiveRate2h,1)}</td><td>{marketCount(markets.find(m=>m.symbol===r.symbol))}/10</td></tr>)}</tbody></table></div></section>
+  </>;
+}
+
+function Signals({data,analytics}){
+  const rows=[...(data?.markets||[])].sort((a,b)=>(b.score||0)-(a.score||0));
+  const map=new Map((analytics?.markets||[]).map(x=>[x.symbol,x]));
+  return <section className="card tableCard"><div className="head"><div><small>CURRENT STATE</small><h2>Signal Radar</h2></div><span className="tag">TOP 100</span></div><div className="tableWrap"><table><thead><tr><th>PAIR</th><th>SCORE</th><th>BUY FLOW</th><th>BOOK</th><th>24H MOM.</th><th>EXCHANGES</th><th>24H FIRSAT</th><th>STATUS</th></tr></thead><tbody>{rows.map(m=>{const h=map.get(m.symbol);return <tr key={m.symbol}><td><b>{m.symbol.replace("USDT","/USDT")}</b></td><td><Score n={m.score}/></td><td>{pct(m.buyPressurePct,1)}</td><td>{pct(m.weightedImbalancePct,1)}</td><td>{pct(m.priceChangePct24h,2)}</td><td>{marketCount(m)}/10</td><td>{h?.opportunities24h??0}</td><td><label className={"tag "+(m.score>=82?"good":"")}>{m.signal}</label></td></tr>})}</tbody></table></div></section>;
+}
+
+function OpportunityTable({analytics,limit=20}){
+  const events=analytics?.events||[];
+  return <section className="card tableCard"><div className="head"><div><small>RECENT WATCH EVENTS</small><h2>Fırsat → Sonuç</h2></div><span className="tag">{events.length} stored</span></div><div className="tableWrap"><table><thead><tr><th>TIME</th><th>PAIR</th><th>ENTRY SCORE</th><th>30M</th><th>1H</th><th>2H</th><th>MAX 2H</th></tr></thead><tbody>{events.slice(0,limit).map(e=><tr key={e.id}><td>{fmtDate(e.signalAt)}</td><td><b>{e.symbol.replace("USDT","/USDT")}</b></td><td><Score n={e.score}/></td><td className={e.r30m>0?"positive":e.r30m<0?"negative":""}>{pct(e.r30m,3)}</td><td className={e.r1h>0?"positive":e.r1h<0?"negative":""}>{pct(e.r1h,3)}</td><td className={e.r2h>0?"positive":e.r2h<0?"negative":""}>{pct(e.r2h,3)}</td><td>{pct(e.maxReturn2h,3)}</td></tr>)}</tbody></table></div></section>;
+}
+
+function ScoreChart({points,symbol}){
+  const values=(points||[]).map(p=>({ts:p.ts,v:p.markets?.find(m=>m.s===symbol)?.score})).filter(x=>x.v!=null);
+  if(values.length<2) return <div className="chartEmpty">24 saatlik grafik doluyor. Sistem 15 dakikada bir score noktası saklıyor.</div>;
+  const w=900,h=220,pad=24,min=0,max=100;
+  const xy=(d,i)=>({x:pad+(i/(values.length-1))*(w-pad*2),y:h-pad-(d.v/100)*(h-pad*2)});
+  const line=values.map((d,i)=>{const q=xy(d,i);return (i?"L":"M")+q.x.toFixed(1)+" "+q.y.toFixed(1)}).join(" ");
+  const area=line+" L "+(w-pad)+" "+(h-pad)+" L "+pad+" "+(h-pad)+" Z";
+  return <div className="scoreChart"><svg viewBox={"0 0 "+w+" "+h}><line x1={pad} x2={w-pad} y1={h-pad-(82/100)*(h-pad*2)} y2={h-pad-(82/100)*(h-pad*2)} className="threshold"/><path d={area} className="area"/><path d={line} className="line"/>{values.slice(-1).map((d,i)=>{const q=xy(d,values.length-1);return <circle key={i} cx={q.x} cy={q.y} r="4"/>})}</svg><div className="chartAxis"><span>24s önce</span><span>82 WATCH</span><span>Şimdi</span></div></div>;
+}
+
+function Row({label,value,width}){return <div className="riskRow"><div><span>{label}</span><b>{value}</b></div><div className="bar"><i style={{width:Math.max(0,Math.min(100,width||0))+"%"}}/></div></div>;}
+
+function Trades({paper}){
+  const trades=paper?.trades||[];
+  return <><div className="notice"><ListFilter size={17}/><div><b>Paper trades only.</b> Gerçek borsaya emir gönderilmiyor.</div></div><section className="card tableCard"><div className="head"><div><small>EXECUTION LOG</small><h2>Paper Trades</h2></div><span className="tag">{trades.length} closed</span></div><div className="tableWrap"><table><thead><tr><th>TIME</th><th>PAIR</th><th>EXCHANGE</th><th>ENTRY</th><th>EXIT</th><th>P&L</th><th>REASON</th></tr></thead><tbody>{trades.slice(0,100).map(t=><tr key={t.id}><td>{fmtDate(t.closedAt)}</td><td><b>{t.symbol}</b></td><td>{t.exchange}</td><td>{price(t.entryPrice)}</td><td>{price(t.exitPrice)}</td><td className={t.netPnl>0?"positive":"negative"}>{Number(t.netPnl||0).toFixed(3)}</td><td>{t.reason}</td></tr>)}</tbody></table></div></section></>;
+}
+
+function Performance({paper}){
+  const trades=paper?.trades||[];
+  const wins=trades.filter(t=>t.netPnl>0).length;
+  const gp=trades.filter(t=>t.netPnl>0).reduce((s,t)=>s+t.netPnl,0);
+  const gl=Math.abs(trades.filter(t=>t.netPnl<0).reduce((s,t)=>s+t.netPnl,0));
+  return <><div className="stats"><Stat icon={Wallet} label="Equity" value={(paper?.equity??1000).toFixed(2)+" TL"} detail="Paper"/><Stat icon={TrendingUp} label="Return" value={(paper?.returnPct??0).toFixed(2)+"%"} detail="Since start"/><Stat icon={Target} label="Win rate" value={trades.length?(wins/trades.length*100).toFixed(1)+"%":"—"} detail={trades.length+" closed"}/><Stat icon={Gauge} label="Profit factor" value={gl?((gp/gl).toFixed(2)):"—"} detail="Modeled fees"/></div><section className="card empty"><BarChart3 size={24}/><h2>1 aylık istatistik alanı</h2><p>30 günlük snapshot geçmişi ayrı tutuluyor. Bu ekranın sonraki adımında aynı fırsatları gün/gün ve coin/coin agregasyonuna çevireceğiz; şu an burada yalnızca paper execution gösteriliyor.</p></section></>;
+}
+
+function ScoreEngine(){
+  const rows=[
+    ["24H momentum","±10","Fiyatın son 24 saatteki yönü"],
+    ["Likidite","+8 / +4","24H quote volume"],
+    ["Borsa kapsamı","+7 / +4 / -8","Kaç borsada sağlıklı fiyat var"],
+    ["Fiyat dağılımı","±4","Borsalar arası fiyat farkı"],
+    ["Order-book","±12","Top depth bid/ask dengesi"],
+    ["Spread","+4 / -5","İşlem maliyeti / likidite kalitesi"],
+    ["Buy pressure","±10","Binance son işlem örneklemindeki alıcı baskısı"]
+  ];
+  return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “WATCH fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>CURRENT FORMULA</small><h2>Score Engine</h2></div><span className="tag">PROTOTYPE</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu score tek başına kullanılmayacak. 5M momentum, volume anomaly, gerçek trade-flow penceresi, slippage, volatilite, cross-exchange teyidi ve risk blokları ayrı Entry Engine olarak test edilecek.</p></section></>;
+}
+
+function Risk({data}){
+  const h=data?.health||{};
+  return <><div className="stats"><Stat icon={ShieldCheck} label="Open positions" value={(data?.paper?.positions?.length??0)+" / 2"} detail="Paper limit"/><Stat icon={Activity} label="Exchange feeds" value={(h.exchangesWithData??0)+"/10"} detail="Snapshot coverage"/><Stat icon={Signal} label="Depth markets" value={h.depthMarkets??0} detail="Top-depth enriched"/><Stat icon={Bot} label="Mode" value="PAPER" detail="No real orders"/></div><section className="card empty"><ShieldCheck size={24}/><h2>Risk controls</h2><p>Gerçek para modu kapalı. Mevcut paper engine 1,000 TL başlangıç, %15 pozisyon ve maksimum 2 açık pozisyon ile çalışıyor.</p></section></>;
+}
+
+function SettingsPage(){
+  return <><div className="notice"><Settings size={17}/><div><b>Free mode.</b> Snapshot scheduler dış cron + GitHub Actions kullanıyor; market verileri public API'lerden geliyor.</div></div><section className="card empty"><Settings size={24}/><h2>System settings</h2><p>Snapshot: 5 dk · Score history: 15 dk · Fırsat horizon: 30 dk / 1 saat / 2 saat · Retention: 30 gün.</p></section></>;
+}
