@@ -398,6 +398,19 @@ async function runPaper(previous, markets, now) {
   state.positions = Array.isArray(state.positions) ? state.positions : [];
   state.trades = Array.isArray(state.trades) ? state.trades : [];
   state.equityHistory = Array.isArray(state.equityHistory) ? state.equityHistory : [];
+  state.marketPrices = state.marketPrices && typeof state.marketPrices === "object" ? state.marketPrices : {};
+
+  // Compare this scan with the previous 5-minute scan. This is deliberately
+  // separate from the 24h momentum so the UI can show the short-term move.
+  for (const m of markets) {
+    const previousPrice = num(state.marketPrices[m.symbol]);
+    m.priceChangePct5m = previousPrice != null && previousPrice > 0 && m.last != null
+      ? ((m.last - previousPrice) / previousPrice) * 100
+      : null;
+  }
+  state.marketPrices = Object.fromEntries(
+    markets.map(m => [m.symbol, m.last]).filter(([, price]) => price != null)
+  );
 
   const map = new Map(markets.map(m => [m.symbol, m]));
   const closedTrades = [];
@@ -563,7 +576,7 @@ function compact(m) {
   return {
     symbol: m.symbol, baseAsset: m.baseAsset, last: m.last, bid: m.bid, ask: m.ask,
     spreadPct: m.spreadPct, quoteVolume24h: m.quoteVolume24h, volume24h: m.volume24h,
-    priceChangePct24h: m.priceChangePct24h, exchangeCount: m.exchangeCount,
+    priceChangePct24h: m.priceChangePct24h, priceChangePct5m: m.priceChangePct5m, exchangeCount: m.exchangeCount,
     activeExchangeCount: m.activeExchangeCount, staleExchangeCount: m.staleExchangeCount,
     priceDispersionPct: m.priceDispersionPct, buyConsensus: m.buyConsensus,
     buyPressurePct: m.buyPressurePct, imbalancePct: m.imbalancePct,
