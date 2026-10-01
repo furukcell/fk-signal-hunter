@@ -13,6 +13,7 @@ const nav=[
 ];
 
 const SNAPSHOT_URL="https://firestore.googleapis.com/v1/projects/fk-signal-hunter/databases/(default)/documents/public/latest";
+const HISTORY_URL="https://firestore.googleapis.com/v1/projects/fk-signal-hunter/databases/(default)/documents:runQuery";
 
 async function fetchTarama(){
   const res=await fetch(SNAPSHOT_URL,{cache:"no-store"});
@@ -21,6 +22,36 @@ async function fetchTarama(){
   const raw=doc?.fields?.payload?.stringValue;
   if(!raw) throw new Error("Veri içeriği bulunamadı");
   return JSON.parse(raw);
+}
+
+async function fetchHistory24h(){
+  const since=new Date(Date.now()-24*60*60*1000).toISOString();
+  const body={
+    structuredQuery:{
+      from:[{collectionId:"historicalSnapshots"}],
+      where:{
+        fieldFilter:{
+          field:{fieldPath:"generatedAt"},
+          op:"GREATER_THAN_OR_EQUAL",
+          value:{timestampValue:since}
+        }
+      },
+      orderBy:[{field:{fieldPath:"generatedAt"},direction:"ASCENDING"}],
+      limit:300
+    }
+  };
+  const res=await fetch(HISTORY_URL,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body),
+    cache:"no-store"
+  });
+  if(!res.ok) throw new Error("24 saatlik geçmiş verisi alınamadı");
+  const rows=await res.json();
+  return (rows||[])
+    .map(row=>row?.document?.fields?.payload?.stringValue)
+    .filter(Boolean)
+    .map(raw=>JSON.parse(raw));
 }
 
 function Stat({icon:Icon,label,value,detail}){
@@ -41,6 +72,8 @@ export default function App(){
   const [tab,setTab]=useState("Ana Sayfa");
   const [data,setData]=useState(null);
   const [market,setMarket]=useState(null);
+  const [history,setHistory]=useState([]);
+  const [historyError,setHistoryError]=useState(null);
   const [error,setError]=useState(null);
 
   useEffect(()=>{
@@ -57,6 +90,19 @@ export default function App(){
     const id=setInterval(load,60000);
     return()=>{alive=false;clearInterval(id)};
   },[market?.symbol]);
+
+  useEffect(()=>{
+    let alive=true;
+    const loadHistory=async()=>{
+      try{
+        const rows=await fetchHistory24h();
+        if(alive){setHistory(rows);setHistoryError(null);}
+      }catch(e){if(alive)setHistoryError(e.message);}
+    };
+    loadHistory();
+    const id=setInterval(loadHistory,300000);
+    return()=>{alive=false;clearInterval(id)};
+  },[]);
 
   const markets=data?.markets??[];
   const analytics=data?.analytics24h;
@@ -157,19 +203,123 @@ function EquityChart({history,initial}){
 
 function MiniRow({label,value}){return <div className="miniRow"><span>{label}</span><b>{value}</b></div>;}
 
-function Scanner({analytics,markets,selectMarket}){
-  const rows=useMemo(()=>[...(analytics?.markets||[])].sort((a,b)=>(b.opportunities24h-a.opportunities24h)||((b.score||0)-(a.score||0))),[analytics]);
+function Scanner({analytics,markets,history,historyError,selectMarket}){
+  const rows=useMemo(()=>[...(markets||[])].sort((a,b)=>(b.quoteVolume24h||0)-(a.quoteVolume24h||0)),[markets]);
+  const [detailSymbol,setDetailSymbol]=useState(rows[0]?.symbol||"");
+  useEffect(()=>{if(!rows.some(x=>x.symbol===detailSymbol))setDetailSymbol(rows[0]?.symbol||"");},[rows,detailSymbol]);
+
+  const selected=rows.find(x=>x.symbol===detailSymbol)||rows[0]||null;
+  const snapshots=useMemo(()=>[...(history||[])].sort((a,b)=>new Date(a.generatedAt)-new Date(b.generatedAt)),[history]);
+  const selectedHistory=useMemo(()=>snapshots.map(s=>{
+    const m=s.markets?.find(x=>x.symbol===detailSymbol);
+    return m?{ts:s.generatedAt,last:m.last,score:m.score,buy:m.buyVolume5m,sell:m.sellVolume5m,net:m.netFlow5m,buyPct:m.buyPressure5mPct}:null;
+  }).filter(Boolean),[snapshots,detailSymbol]);
+
   return <>
-    <div className="notice"><TrendingUp size={17}/><div><b>24 Saatlik Tarama.</b> Buradaki “fırsat” bir gerçek emir değil; skorun 82 eşiğini yukarı kesmesi. Sonuçlar daha sonra ölçülüyor.</div></div>
+    <div className="notice"><TrendingUp size={17}/><div><b>24 saatlik piyasa ekranı.</b> Burada ilk 100 coin, güncel fiyatı, son 5 dakikalık para akışı ve borsalardaki fiyatları birlikte izlenir. Geçmiş taramalar 5 dakikalık aralıklarla saklanır.</div></div>
+    {historyError&&<div className="notice"><RefreshCw size={17}/><div><b>Geçmiş:</b> {historyError}</div></div>}
     <div className="stats">
-      <Stat icon={Target} label="Coin sayısı" value={markets.length} detail="Kapsam"/>
-      <Stat icon={Signal} label="Fırsat" value={analytics?.summary?.totalOpportunities24h??0} detail="Son 24 saat"/>
-      <Stat icon={TrendingUp} label="Ortalama 30 DK" value={pct(analytics?.summary?.avgReturn30m,3)} detail="Ölçülen"/>
-      <Stat icon={TrendingUp} label="Ortalama 1 SAAT" value={pct(analytics?.summary?.avgReturn1h,3)} detail="Ölçülen"/>
-      <Stat icon={TrendingUp} label="Ortalama 2 SAAT" value={pct(analytics?.summary?.avgReturn2h,3)} detail="Ölçülen"/>
+      <Stat icon={Target} label="Takip edilen coin" value={rows.length} detail="Hedef: ilk 100"/>
+      <Stat icon={Activity} label="5 dk kayıt" value={snapshots.length} detail="Son 24 saat"/>
+      <Stat icon={TrendingUp} label="Güncel veri" value={markets.filter(m=>m.last!=null).length} detail="Fiyatı bulunan"/>
+      <Stat icon={Wallet} label="Para akışı" value={markets.filter(m=>m.flowVolume5m!=null).length} detail="5 dk akışı bulunan"/>
+      <Stat icon={Signal} label="Fırsat" value={analytics?.summary?.totalOpportunities24h??0} detail="Skor 82+"/>
     </div>
-    <section className="card tableCard"><div className="head"><div><small>İLK 100 COIN / SON 24 SAAT</small><h2>Fırsat Sonuçları</h2></div><span className="tag">5 DK VERİ</span></div><div className="tableWrap"><table><thead><tr><th>COIN</th><th>SKOR</th><th>SON 5 DK</th><th>FIRSAT</th><th>30 DK ORT.</th><th>1 SAAT ORT.</th><th>2 SAAT ORT.</th><th>2 SAAT POZİTİF</th><th>BORSALAR</th></tr></thead><tbody>{rows.map(r=><tr key={r.symbol} onClick={()=>selectMarket(r.symbol)} className="clickRow"><td><b>{r.symbol.replace("USDT","/USDT")}</b></td><td><Score n={r.score}/></td><td className={(markets.find(m=>m.symbol===r.symbol)?.priceChangePct5m||0)>0?"positive":(markets.find(m=>m.symbol===r.symbol)?.priceChangePct5m||0)<0?"negative":""}>{pct(markets.find(m=>m.symbol===r.symbol)?.priceChangePct5m,3)}</td><td>{r.opportunities24h}</td><td>{pct(r.avgReturn30m,3)}</td><td>{pct(r.avgReturn1h,3)}</td><td>{pct(r.avgReturn2h,3)}</td><td>{pct(r.positiveRate2h,1)}</td><td>{marketCount(markets.find(m=>m.symbol===r.symbol))}/10</td></tr>)}</tbody></table></div></section>
+
+    <section className="card tableCard marketBoard">
+      <div className="head">
+        <div><small>İLK 100 COIN / CANLI GÖRÜNÜM</small><h2>Tüm Piyasa</h2></div>
+        <span className="tag">{snapshots.length ? snapshots.length+" x 5 DK" : "Geçmiş yükleniyor"}</span>
+      </div>
+      <div className="tableWrap">
+        <table>
+          <thead><tr>
+            <th>#</th><th>COIN</th><th>FİYAT</th><th>5 DK</th><th>5 DK ALIŞ</th><th>5 DK SATIŞ</th><th>NET AKIŞ</th><th>ALICI %</th><th>24S HACİM</th><th>SKOR</th><th>BORSALAR</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((m,i)=>{
+              const active=m.symbol===selected?.symbol;
+              const ch=Number(m.priceChangePct5m||0);
+              return <tr key={m.symbol} className={"clickRow "+(active?"selectedRow":"")} onClick={()=>{setDetailSymbol(m.symbol);selectMarket(m.symbol);}}>
+                <td>{i+1}</td>
+                <td><b>{m.symbol.replace("USDT","/USDT")}</b></td>
+                <td className="marketPrice">{price(m.last)}</td>
+                <td className={ch>0?"positive":ch<0?"negative":""}>{pct(m.priceChangePct5m,3)}</td>
+                <td>{moneyCompact(m.buyVolume5m)}</td>
+                <td>{moneyCompact(m.sellVolume5m)}</td>
+                <td className={(m.netFlow5m||0)>0?"positive":(m.netFlow5m||0)<0?"negative":""}>{moneyCompact(m.netFlow5m)}</td>
+                <td>{pct(m.buyPressure5mPct??m.buyPressurePct,1)}</td>
+                <td>{moneyCompact(m.quoteVolume24h)}</td>
+                <td><Score n={m.score}/></td>
+                <td>{marketCount(m)}/10</td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    {selected&&<MarketDetail market={selected} history={selectedHistory}/>}
   </>;
+}
+
+function moneyCompact(n){
+  if(n==null||!Number.isFinite(Number(n)))return "—";
+  const x=Number(n);
+  if(Math.abs(x)>=1e9)return (x/1e9).toFixed(2)+"B";
+  if(Math.abs(x)>=1e6)return (x/1e6).toFixed(2)+"M";
+  if(Math.abs(x)>=1e3)return (x/1e3).toFixed(1)+"K";
+  return x.toFixed(2);
+}
+
+function MarketDetail({market,history}){
+  const series=history.slice(-288);
+  const exchangeRows=Object.entries(market.exchangeData||{})
+    .map(([exchange,v])=>({exchange,...v}))
+    .sort((a,b)=>(b.quoteVolume24h||0)-(a.quoteVolume24h||0));
+
+  return <section className="card marketDetail">
+    <div className="head">
+      <div><small>SEÇİLİ COIN / SON 24 SAAT</small><h2>{market.symbol.replace("USDT","/USDT")} · {price(market.last)}</h2></div>
+      <div className="detailBadges"><span className="tag">Skor {market.score}</span><span className="tag">{market.activeExchangeCount}/10 borsa</span></div>
+    </div>
+
+    <div className="detailStats">
+      <div><small>SON 5 DK ALIŞ</small><b>{moneyCompact(market.buyVolume5m)}</b></div>
+      <div><small>SON 5 DK SATIŞ</small><b>{moneyCompact(market.sellVolume5m)}</b></div>
+      <div><small>NET PARA AKIŞI</small><b className={(market.netFlow5m||0)>=0?"positive":"negative"}>{moneyCompact(market.netFlow5m)}</b></div>
+      <div><small>ALICI BASKISI</small><b>{pct(market.buyPressure5mPct??market.buyPressurePct,1)}</b></div>
+      <div><small>5 DK HACİM</small><b>{moneyCompact(market.flowVolume5m)}</b></div>
+    </div>
+
+    <div className="flowChartCard">
+      <div className="head"><div><small>5 DAKİKALIK AKIŞ</small><h3>24 saat boyunca para girişi / çıkışı</h3></div><span className="tag">{series.length} nokta</span></div>
+      <FlowChart history={series}/>
+    </div>
+
+    <div className="exchangeTable">
+      <div className="head"><div><small>10 BORSADAN GÜNCEL FİYATLAR</small><h3>Borsa karşılaştırması</h3></div><span className="tag">ANLIK TARAMA</span></div>
+      <div className="tableWrap">
+        <table><thead><tr><th>BORSA</th><th>SON FİYAT</th><th>ALIŞ</th><th>SATIŞ</th><th>SPREAD</th><th>24S HACİM</th></tr></thead>
+        <tbody>{exchangeRows.map(v=><tr key={v.exchange}><td><b>{v.exchange.toUpperCase()}</b></td><td>{price(v.price)}</td><td>{price(v.bid)}</td><td>{price(v.ask)}</td><td>{pct(v.spreadPct,3)}</td><td>{moneyCompact(v.quoteVolume24h)}</td></tr>)}</tbody></table>
+      </div>
+    </div>
+  </section>;
+}
+
+function FlowChart({history}){
+  if(history.length<2)return <div className="chartEmpty"><BarChart3 size={24}/><b>24 saatlık akış grafiği oluşuyor</b><span>Her 5 dakikalık taramada bir nokta kaydedilecek.</span></div>;
+  const w=1000,h=260,p=30,values=history.map(x=>Number(x.net)||0);
+  const max=Math.max(1,...values.map(x=>Math.abs(x)));
+  const y0=h/2;
+  const points=values.map((v,i)=>{
+    const x=p+(i/(values.length-1))*(w-p*2);
+    const y=y0-(v/max)*(h/2-p);
+    return (i?"L":"M")+" "+x.toFixed(1)+" "+y.toFixed(1);
+  }).join(" ");
+  const positiveBars=history.map((x,i)=>{const v=Number(x.buy||0);const x1=p+(i/(history.length-1))*(w-p*2);const bar=Math.max(1,(v/max)*(h/2-p));return <rect key={"b"+i} x={x1-1.2} y={y0-bar} width="2.4" height={bar} className="flowBuy"/>;});
+  const negativeBars=history.map((x,i)=>{const v=Number(x.sell||0);const x1=p+(i/(history.length-1))*(w-p*2);const bar=Math.max(1,(v/max)*(h/2-p));return <rect key={"s"+i} x={x1-1.2} y={y0} width="2.4" height={bar} className="flowSell"/>;});
+  return <div className="flowChart"><svg viewBox={"0 0 "+w+" "+h}><line x1={p} x2={w-p} y1={y0} y2={y0} className="baseline"/>{positiveBars}{negativeBars}<path d={points} className="line"/></svg><div className="chartAxis"><span>24 saat önce</span><span>Şimdi</span></div><div className="flowLegend"><span><i className="flowBuy"/> Alıcı para akışı</span><span><i className="flowSell"/> Satıcı para akışı</span></div></div>;
 }
 
 function Signals({data,analytics}){
