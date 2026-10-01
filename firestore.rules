@@ -1,5 +1,6 @@
 rules_version = '2';
 
+// Public read-only history powers the 24-hour market board.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /public/latest {
