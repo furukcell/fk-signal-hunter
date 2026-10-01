@@ -1,0 +1,27 @@
+name: Feature Validation
+
+on:
+  push:
+    branches:
+      - feature/24h-signal-analytics
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Backend install
+        working-directory: backend
+        run: npm install --omit=dev
+      - name: Backend tests
+        working-directory: backend
+        run: npm test
+      - name: Frontend install
+        working-directory: frontend
+        run: npm install
+      - name: Frontend build
+        working-directory: frontend
+        run: npm run build
