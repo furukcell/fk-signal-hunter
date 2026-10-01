@@ -11,7 +11,7 @@ const HISTORY_RETENTION_DAYS = 30;
 const EXCHANGE_IDS = ["binance","coinbase","upbit","okx","bybit","bitget","gate","kucoin","mexc","htx"];
 const BINANCE_PUBLIC_BASE = "https://data-api.binance.vision";
 const BYBIT_PUBLIC_BASE = "https://api.bybit.com";
-const BINANCE_TRADE_COINS = Number(process.env.SNAPSHOT_BINANCE_TRADE_COINS || 20);
+const BINANCE_TRADE_COINS = Number(process.env.SNAPSHOT_BINANCE_TRADE_COINS || 100);
 
 const num = value => {
   const n = Number(value);
@@ -31,12 +31,13 @@ async function loadUniverse() {
   try {
     const key = process.env.COINGECKO_API_KEY || "";
     const url = key
-      ? `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MAX_COINS}&page=1&sparkline=false&x_cg_demo_api_key=${encodeURIComponent(key)}`
-      : `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MAX_COINS}&page=1&sparkline=false`;
+      ? `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MAX_COINS + 20}&page=1&sparkline=false&x_cg_demo_api_key=${encodeURIComponent(key)}`
+      : `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MAX_COINS + 20}&page=1&sparkline=false`;
     const rows = await fetchJson(url);
     return rows.map(x => String(x.symbol || "").toUpperCase())
       .filter(Boolean)
-      .filter(x => !/^(USDT|USDC|BUSD|DAI|FDUSD|TUSD|USDE|USDD|PYUSD)$/.test(x));
+      .filter(x => !/^(USDT|USDC|BUSD|DAI|FDUSD|TUSD|USDE|USDD|PYUSD)$/.test(x))
+      .slice(0, MAX_COINS);
   } catch (error) {
     console.warn("CoinGecko unavailable; using exchange volume fallback:", error.message);
     return [];
@@ -135,30 +136,41 @@ async function fetchBybitDirect(bases) {
   }).filter(Boolean);
 }
 
-async function fetchBinanceTradeFlow(markets) {
-  const targets = markets
-    .slice()
-    .sort((a, b) => (b.exchangeData?.binance?.quoteVolume24h || 0) - (a.exchangeData?.binance?.quoteVolume24h || 0))
-    .slice(0, BINANCE_TRADE_COINS);
+async function fetchBinanceFiveMinuteFlow(markets) {
+  // Last completed 5-minute Binance spot candle for every tracked coin.
+  // Kline data gives quote volume and taker-buy quote volume, so we can
+  // estimate money entering via taker buys versus taker sells without keys.
+  const targets = markets.filter(m => m.symbol);
+  const results = await mapConcurrent(targets, 10, async m => {
+    const rows = await fetchJson(
+      `${BINANCE_PUBLIC_BASE}/api/v3/klines?symbol=${encodeURIComponent(m.symbol)}&interval=5m&limit=2`
+    );
+    const completed = Array.isArray(rows) && rows.length > 1 ? rows[rows.length - 2] : rows?.[0];
+    if (!completed) return null;
 
-  const results = await mapConcurrent(targets, 6, async m => {
-    const trades = await fetchJson(`${BINANCE_PUBLIC_BASE}/api/v3/trades?symbol=${encodeURIComponent(m.symbol)}&limit=100`);
-    let buyQuote = 0;
-    let sellQuote = 0;
-    let latest = null;
-    for (const t of trades || []) {
-      const quote = num(t.quoteQty) ?? ((num(t.price) || 0) * (num(t.qty) || 0));
-      if (t.isBuyerMaker) sellQuote += quote;
-      else buyQuote += quote;
-      latest = Math.max(latest || 0, Number(t.time) || 0);
-    }
+    const openTime = Number(completed[0]) || null;
+    const closeTime = Number(completed[6]) || null;
+    const quoteVolume = num(completed[7]) ?? 0;
+    const trades = Number(completed[8]) || 0;
+    const buyQuote = num(completed[10]) ?? 0;
+    const sellQuote = Math.max(0, quoteVolume - buyQuote);
     const total = buyQuote + sellQuote;
+
     return {
       symbol: m.symbol,
-      buyPressurePct: total > 0 ? (buyQuote / total) * 100 : null,
-      flowVolume: total || null,
-      trades: (trades || []).length,
-      lastTradeAt: latest || null
+      flow5mAt: openTime,
+      flow5mCloseAt: closeTime,
+      buyVolume5m: buyQuote,
+      sellVolume5m: sellQuote,
+      flowVolume5m: total,
+      netFlow5m: buyQuote - sellQuote,
+      buyPressure5mPct: total > 0 ? (buyQuote / total) * 100 : null,
+      sellPressure5mPct: total > 0 ? (sellQuote / total) * 100 : null,
+      trades5m: trades,
+      candle5mOpen: num(completed[1]),
+      candle5mHigh: num(completed[2]),
+      candle5mLow: num(completed[3]),
+      candle5mClose: num(completed[4])
     };
   });
   return results.filter(Boolean);
@@ -318,10 +330,23 @@ function aggregateUniverse(bases, rows) {
     m.staleExchangeCount = Math.max(0, m.exchangeCount - m.activeExchangeCount);
     const binanceFlow = m.binanceFlow;
     if (binanceFlow) {
-      m.buyPressurePct = binanceFlow.buyPressurePct;
-      m.flowVolume = binanceFlow.flowVolume;
-      m.trades = binanceFlow.trades;
-      m.lastTradeAt = binanceFlow.lastTradeAt;
+      m.buyPressurePct = binanceFlow.buyPressure5mPct;
+      m.flowVolume = binanceFlow.flowVolume5m;
+      m.trades = binanceFlow.trades5m;
+      m.lastTradeAt = binanceFlow.flow5mCloseAt;
+      m.buyVolume5m = binanceFlow.buyVolume5m;
+      m.sellVolume5m = binanceFlow.sellVolume5m;
+      m.flowVolume5m = binanceFlow.flowVolume5m;
+      m.netFlow5m = binanceFlow.netFlow5m;
+      m.buyPressure5mPct = binanceFlow.buyPressure5mPct;
+      m.sellPressure5mPct = binanceFlow.sellPressure5mPct;
+      m.trades5m = binanceFlow.trades5m;
+      m.candle5mOpen = binanceFlow.candle5mOpen;
+      m.candle5mHigh = binanceFlow.candle5mHigh;
+      m.candle5mLow = binanceFlow.candle5mLow;
+      m.candle5mClose = binanceFlow.candle5mClose;
+      m.flow5mAt = binanceFlow.flow5mAt;
+      m.flow5mCloseAt = binanceFlow.flow5mCloseAt;
     }
     scoreMarket(m);
   }
@@ -579,7 +604,11 @@ function compact(m) {
     priceChangePct24h: m.priceChangePct24h, priceChangePct5m: m.priceChangePct5m, exchangeCount: m.exchangeCount,
     activeExchangeCount: m.activeExchangeCount, staleExchangeCount: m.staleExchangeCount,
     priceDispersionPct: m.priceDispersionPct, buyConsensus: m.buyConsensus,
-    buyPressurePct: m.buyPressurePct, imbalancePct: m.imbalancePct,
+    buyPressurePct: m.buyPressurePct, buyVolume5m: m.buyVolume5m, sellVolume5m: m.sellVolume5m,
+    flowVolume5m: m.flowVolume5m, netFlow5m: m.netFlow5m, buyPressure5mPct: m.buyPressure5mPct,
+    sellPressure5mPct: m.sellPressure5mPct, trades5m: m.trades5m, flow5mAt: m.flow5mAt,
+    flow5mCloseAt: m.flow5mCloseAt, candle5mOpen: m.candle5mOpen, candle5mHigh: m.candle5mHigh,
+    candle5mLow: m.candle5mLow, candle5mClose: m.candle5mClose, imbalancePct: m.imbalancePct,
     weightedImbalancePct: m.weightedImbalancePct, bids: m.bids, asks: m.asks,
     score: m.score, signal: m.signal, reasons: m.reasons, opportunity: m.opportunity,
     exchangeData: m.exchangeData, updatedAt: m.updatedAt
@@ -639,7 +668,7 @@ async function main() {
   let markets = aggregateUniverse(bases.slice(0, MAX_COINS), rows);
 
   try {
-    const flow = await fetchBinanceTradeFlow(markets);
+    const flow = await fetchBinanceFiveMinuteFlow(markets);
     const bySymbol = new Map(flow.map(x => [x.symbol, x]));
     for (const m of markets) {
       m.binanceFlow = bySymbol.get(m.symbol) || null;
@@ -651,7 +680,7 @@ async function main() {
       }
       scoreMarket(m);
     }
-    console.log(`binance direct trade flow: ${flow.length} markets`);
+    console.log(`binance 5m money flow: ${flow.length} markets`);
   } catch (error) {
     console.error(`binance trade flow failed: ${error.message}`);
   }

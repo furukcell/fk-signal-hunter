@@ -66,3 +66,34 @@
 .linkBtn{background:none;border:0;color:#8490a1;font-size:9px;cursor:pointer}
 @media(max-width:1000px){.paperHero{grid-template-columns:1fr 1fr}.bandGrid,.settingsGrid{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.paperHero{grid-template-columns:1fr}.bandGrid,.settingsGrid{grid-template-columns:1fr}.tradeRow{grid-template-columns:1fr auto}.tradeRow strong{grid-column:2;grid-row:1/3}}
+
+
+/* 24 saatlik piyasa ekranı */
+.marketBoard .tableWrap{max-height:620px;overflow:auto}
+.marketBoard table{min-width:1180px}
+.marketBoard th{position:sticky;top:0;z-index:2;background:var(--panel,#10151c)}
+.marketBoard .selectedRow td{background:rgba(110,190,150,.08)}
+.marketBoard .marketPrice{font-weight:700;font-variant-numeric:tabular-nums}
+.marketDetail{margin-top:16px}
+.detailBadges{display:flex;gap:8px;align-items:center}
+.detailStats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.detailStats>div{padding:14px;border:1px solid var(--border,#202732);border-radius:12px;background:rgba(255,255,255,.015)}
+.detailStats small{display:block;margin-bottom:6px}
+.detailStats b{font-size:17px}
+.flowChartCard,.exchangeTable{border:1px solid var(--border,#202732);border-radius:12px;padding:14px;margin-top:14px}
+.flowChart{width:100%}
+.flowChart svg{width:100%;height:260px;display:block}
+.flowChart .flowBuy{fill:rgba(75,200,150,.5)}
+.flowChart .flowSell{fill:rgba(220,90,100,.5)}
+.flowChart .baseline{stroke:rgba(255,255,255,.16);stroke-width:1}
+.flowChart .line{fill:none;stroke:currentColor;stroke-width:1.5;opacity:.75}
+.flowLegend{display:flex;gap:18px;font-size:11px;color:var(--muted,#7f8997);margin-top:8px}
+.flowLegend span{display:flex;gap:6px;align-items:center}
+.flowLegend i{width:9px;height:9px;display:inline-block;border-radius:2px}
+.flowLegend .flowBuy{background:rgba(75,200,150,.7)}
+.flowLegend .flowSell{background:rgba(220,90,100,.7)}
+.exchangeTable table{min-width:760px}
+@media(max-width:900px){
+  .detailStats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .marketBoard .tableWrap{max-height:520px}
+}
