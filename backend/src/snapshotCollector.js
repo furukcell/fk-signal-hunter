@@ -412,7 +412,9 @@ function aggregateUniverse(bases, rows) {
       .map(x => x.spreadPct)
       .filter(Number.isFinite);
 
-    if (localSpreads.length) {
+    if (reference && Number.isFinite(reference.spreadPct)) {
+      m.spreadPct = reference.spreadPct;
+    } else if (localSpreads.length) {
       m.spreadPct = Math.min(...localSpreads);
     }
 
@@ -455,7 +457,18 @@ async function enrichDepth(markets, exchanges) {
         const book = await exchange.fetchOrderBook(`${m.baseAsset}/USDT`, ORDERBOOK_LIMIT);
         const f = bookFeatures(book);
         const row = m.exchangeData[exchange.id];
-        if (row) Object.assign(row, { bids: f.bids, asks: f.asks, imbalancePct: f.imbalancePct });
+        if (row) Object.assign(row, {
+          bids: f.bids,
+          asks: f.asks,
+          imbalancePct: f.imbalancePct,
+          imbalanceL1Pct: f.imbalanceL1Pct,
+          imbalanceL5Pct: f.imbalanceL5Pct,
+          imbalanceL20Pct: f.imbalanceL20Pct,
+          depthNotionalL5: f.depthNotionalL5,
+          depthNotionalL20: f.depthNotionalL20,
+          microPrice: f.microPrice,
+          microPriceOffsetPct: f.microPriceOffsetPct
+        });
       } catch {}
     });
   }
@@ -520,7 +533,8 @@ function applyEntryFeatures(markets, previousState, now) {
     m.priceChangePct30m = p30 && current && p30.price > 0 ? ((current - p30.price) / p30.price) * 100 : null;
     m.priceChangePct60m = p60 && current && p60.price > 0 ? ((current - p60.price) / p60.price) * 100 : null;
 
-    const average5m = Number(m.quoteVolume24h || 0) / 288;
+    const binance24h = Number(m.exchangeData?.binance?.quoteVolume24h || m.quoteVolume24h || 0);
+    const average5m = binance24h / 288;
     m.relativeVolume5m = average5m > 0 && Number(m.flowVolume5m) >= 0
       ? Number(m.flowVolume5m || 0) / average5m : null;
     m.netFlowRatio5m = Number(m.flowVolume5m || 0) > 0
