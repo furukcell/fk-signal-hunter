@@ -29,7 +29,7 @@ async function fetchPaperTrades(){
   const body={
     structuredQuery:{
       from:[{collectionId:"paperTrades"}],
-      orderBy:[{field:{fieldPath:"kapananAt"},direction:"DESCENDING"}],
+      orderBy:[{field:{fieldPath:"closedAt"},direction:"DESCENDING"}],
       limit:1000
     }
   };
@@ -231,7 +231,7 @@ function OpenPositions({positions,markets}){
 
 function TradeRows({trades}){
   if(!trades.length)return <div className="emptySmall"><ListFilter size={22}/><b>Henüz kapanan işlem yok</b><span>Bot ilk uygun fırsatı bulduğunda burada görünecek.</span></div>;
-  return <div className="tradeList">{trades.map(t=><div className="tradeRow" key={t.id}><div><b>{t.symbol.replace("USDT","/USDT")}</b><span>{fmtDate(t.kapananAt)} · Skor {t.score}</span></div><div><span>{t.reason==="TP_1PCT"?"%1 kâr":"-%0,8 zarar"}</span><span>{fmtMinutes(t.holdingMinutes)}</span></div><strong className={t.netPnl>=0?"positive":"negative"}>{t.netPnl>=0?"+":""}{Number(t.netPnl||0).toFixed(3)} TL</strong></div>)}</div>;
+  return <div className="tradeList">{trades.map(t=><div className="tradeRow" key={t.id}><div><b>{t.symbol.replace("USDT","/USDT")}</b><span>{fmtDate(t.closedAt)} · Skor {t.score}</span></div><div><span>{t.reason==="TP_1PCT"?"%1 kâr":"-%0,8 zarar"}</span><span>{fmtMinutes(t.holdingMinutes)}</span></div><strong className={t.netPnl>=0?"positive":"negative"}>{t.netPnl>=0?"+":""}{Number(t.netPnl||0).toFixed(3)} TL</strong></div>)}</div>;
 }
 
 function EquityChart({history,initial}){
@@ -410,7 +410,7 @@ function Trades({paper,paperTrades,paperTradesError}){
     </div>
     {paperTradesError&&<div className="notice"><RefreshCw size={17}/><div><b>İşlem geçmişi:</b> {paperTradesError}</div></div>}
     <div className="notice"><ListFilter size={17}/><div><b>Sanal işlem defteri.</b> Her kapanan işlem ayrı olarak kaydediliyor. Gerçek borsaya hiçbir emir gönderilmiyor.</div></div>
-    <section className="card tableCard"><div className="head"><div><small>TÜM KAPANAN İŞLEMLER</small><h2>İşlem Geçmişi</h2></div><span className="tag">{trades.length} kayıt yüklendi</span></div><div className="tableWrap"><table><thead><tr><th>ZAMAN</th><th>PARİTE</th><th>SKOR</th><th>BORSA</th><th>GİRİŞ</th><th>ÇIKIŞ</th><th>NET K/Z</th><th>SÜRE</th><th>SONUÇ</th></tr></thead><tbody>{trades.slice(0,200).map(t=><tr key={t.id}><td>{fmtDate(t.kapananAt)}</td><td><b>{t.symbol}</b></td><td><Score n={t.score}/></td><td>{t.exchange}</td><td>{price(t.entryPrice)}</td><td>{price(t.exitPrice)}</td><td className={t.netPnl>0?"positive":"negative"}>{Number(t.netPnl||0).toFixed(3)} TL</td><td>{Number(t.holdingMinutes||0).toFixed(0)} dk</td><td>{t.reason==="TP_1PCT"?"%1 KÂR":"-%0.8 ZARAR"}</td></tr>)}</tbody></table></div></section>
+    <section className="card tableCard"><div className="head"><div><small>TÜM KAPANAN İŞLEMLER</small><h2>İşlem Geçmişi</h2></div><span className="tag">{trades.length} kayıt yüklendi</span></div><div className="tableWrap"><table><thead><tr><th>ZAMAN</th><th>PARİTE</th><th>SKOR</th><th>BORSA</th><th>GİRİŞ</th><th>ÇIKIŞ</th><th>NET K/Z</th><th>SÜRE</th><th>SONUÇ</th></tr></thead><tbody>{trades.slice(0,200).map(t=><tr key={t.id}><td>{fmtDate(t.closedAt)}</td><td><b>{t.symbol}</b></td><td><Score n={t.score}/></td><td>{t.exchange}</td><td>{price(t.entryPrice)}</td><td>{price(t.exitPrice)}</td><td className={t.netPnl>0?"positive":"negative"}>{Number(t.netPnl||0).toFixed(3)} TL</td><td>{Number(t.holdingMinutes||0).toFixed(0)} dk</td><td>{t.reason==="TP_1PCT"?"%1 KÂR":"-%0.8 ZARAR"}</td></tr>)}</tbody></table></div></section>
   </>;
 }
 
