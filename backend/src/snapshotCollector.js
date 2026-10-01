@@ -6,6 +6,7 @@ const MAX_COINS = Number(process.env.SNAPSHOT_MAX_COINS || 100);
 const DEPTH_COINS = Number(process.env.SNAPSHOT_DEPTH_COINS || 20);
 const ORDERBOOK_LIMIT = 20;
 const QUOTE = "USDT";
+const HISTORY_RETENTION_DAYS = 30;
 const EXCHANGE_IDS = ["binance","coinbase","upbit","okx","bybit","bitget","gate","kucoin","mexc","htx"];
 
 const num = value => {
@@ -384,10 +385,15 @@ async function main() {
   await firebase.writePublicSnapshot(payload);
   await firebase.writeHistoricalSnapshot(now, payload);
 
+  const cutoff = now - HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const deletedHistoricalSnapshots = await firebase.deleteHistoricalSnapshotsOlderThan(cutoff);
+
   console.log(JSON.stringify({
     generatedAt: payload.generatedAt, markets: markets.length,
     exchangesWithData: payload.health.exchangesWithData,
     depthMarkets: payload.health.depthMarkets,
+    deletedHistoricalSnapshots,
+    historyRetentionDays: HISTORY_RETENTION_DAYS,
     topSignals: payload.signals.slice(0, 5).map(x => [x.symbol, x.score, x.signal]),
     durationMs: payload.health.durationMs
   }, null, 2));
