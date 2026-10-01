@@ -37,7 +37,7 @@ jobs:
 
       - name: Deploy Hosting
         run: |
-          npx firebase-tools@latest deploy --project fk-signal-hunter --only hosting --non-interactive
+          npx firebase-tools@latest deploy --project fk-signal-hunter --only hosting,firestore:rules --non-interactive
 
       - name: Remove credentials
         if: always()
