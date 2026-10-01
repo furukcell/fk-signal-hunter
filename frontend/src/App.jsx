@@ -1,3 +1,4 @@
+// FK Signal Hunter 24-hour market board
 import {useEffect,useMemo,useState} from "react";
 import {Activity,BarChart3,Bot,Gauge,LayoutDashboard,ListFilter,Menu,RefreshCw,Settings as SettingsIcon,ShieldCheck,Signal,Target,TrendingUp,Wallet,X} from "lucide-react";
 
