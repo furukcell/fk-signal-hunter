@@ -531,6 +531,12 @@ async function runPaper(previous, markets, now) {
   state.averageTradePnl = state.totalTrades > 0 ? state.realizedPnl / state.totalTrades : null;
   state.availableCash = state.balance;
   state.openPositionValue = openValue;
+  state.unrealizedPnl = openValue - state.positions.reduce((sum, p) => sum + (p.quoteCost || 0), 0);
+  const todayStart = new Date(now);
+  todayStart.setUTCHours(0, 0, 0, 0);
+  const todayTrades = state.trades.filter(t => Number(t.closedAt) >= todayStart.getTime());
+  state.todayTrades = todayTrades.length;
+  state.todayPnl = todayTrades.reduce((sum, t) => sum + (Number(t.netPnl) || 0), 0);
   state.positionSizePct = 10;
   state.takeProfitPct = 1;
   state.stopLossPct = -0.8;
