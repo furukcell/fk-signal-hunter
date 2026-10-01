@@ -1,6 +1,13 @@
 name: Deploy Free Firebase Panel
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - "firebase.json"
+      - ".firebaserc"
   workflow_dispatch:
 
 permissions:
