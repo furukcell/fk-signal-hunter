@@ -57,7 +57,9 @@ function normalizeTicker(exchange, ticker, market, now) {
   return {
     exchange, symbol: market.symbol, baseAsset: market.base, quoteAsset: market.quote,
     price, bid, ask,
-    spreadPct: bid != null && ask != null && bid > 0 ? ((ask - bid) / bid) * 100 : null,
+    spreadPct: bid != null && ask != null && bid > 0 && ask > 0 && ask >= bid
+      ? ((ask - bid) / bid) * 100
+      : null,
     quoteVolume24h: num(ticker.quoteVolume) ?? 0,
     volume24h: num(ticker.baseVolume) ?? 0,
     priceChangePct24h: num(ticker.percentage),
@@ -174,14 +176,41 @@ function aggregateUniverse(bases, rows) {
 
   for (const m of map.values()) {
     const venues = Object.values(m.exchangeData);
-    const prices = venues.map(x => num(x.price)).filter(Number.isFinite);
-    const bids = venues.map(x => num(x.bid)).filter(Number.isFinite);
-    const asks = venues.map(x => num(x.ask)).filter(Number.isFinite);
-    if (prices.length) m.last = prices.reduce((a, b) => a + b, 0) / prices.length;
-    if (bids.length) m.bid = Math.max(...bids);
-    if (asks.length) m.ask = Math.min(...asks);
-    if (m.bid != null && m.ask != null && m.bid > 0) m.spreadPct = ((m.ask - m.bid) / m.bid) * 100;
-    if (prices.length >= 2 && m.last > 0) m.priceDispersionPct = ((Math.max(...prices) - Math.min(...prices)) / m.last) * 100;
+    const pricedVenues = venues.filter(x => Number.isFinite(x.price) && x.price > 0);
+    const quoteVenues = venues.filter(x => Number.isFinite(x.bid) && x.bid > 0 && Number.isFinite(x.ask) && x.ask > 0);
+
+    if (pricedVenues.length) {
+      const sortedPrices = pricedVenues.map(x => x.price).sort((a, b) => a - b);
+      const middle = Math.floor(sortedPrices.length / 2);
+      m.last = sortedPrices.length % 2
+        ? sortedPrices[middle]
+        : (sortedPrices[middle - 1] + sortedPrices[middle]) / 2;
+    }
+
+    // Display a real executable bid/ask pair from one venue, rather than
+    // combining the highest bid with the lowest ask across different venues.
+    // Cross-exchange differences are handled separately by buildOpportunity().
+    const reference = quoteVenues
+      .slice()
+      .sort((a, b) => (b.quoteVolume24h || 0) - (a.quoteVolume24h || 0))[0];
+
+    if (reference) {
+      m.bid = reference.bid;
+      m.ask = reference.ask;
+    }
+
+    const localSpreads = quoteVenues
+      .map(x => x.spreadPct)
+      .filter(Number.isFinite);
+
+    if (localSpreads.length) {
+      m.spreadPct = Math.min(...localSpreads);
+    }
+
+    if (pricedVenues.length >= 2 && m.last > 0) {
+      m.priceDispersionPct = ((Math.max(...pricedVenues.map(x => x.price)) - Math.min(...pricedVenues.map(x => x.price))) / m.last) * 100;
+    }
+
     m.staleExchangeCount = Math.max(0, m.exchangeCount - m.activeExchangeCount);
     scoreMarket(m);
   }
@@ -339,7 +368,8 @@ async function main() {
   const payload = {
     generatedAt: new Date(now).toISOString(), intervalMinutes: 5, universeSize: markets.length,
     exchanges: EXCHANGE_IDS, markets: markets.map(compact),
-    signals: markets.filter(m => m.signal !== "WAIT").slice(0, 50), paper,
+    signals: markets.filter(m => m.signal !== "WAIT").slice(0, 50),
+    paper,
     health: {
       collector: "github-actions", durationMs: Date.now() - startedAt,
       exchangeRows: rows.length, exchangesWithData: new Set(rows.map(x => x.exchange)).size,
