@@ -2,7 +2,7 @@ name: Free Market Snapshot Scheduler
 
 on:
   schedule:
-    - cron: "7,12,17,22,27,32,37,42,47,52,57 * * * *"
+    - cron: "8,13,18,23,28,33,38,43,48,53,58 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -25,16 +25,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: backend/package.json
-
       - name: Install dependencies
         run: npm install --omit=dev
-
       - name: Collect market snapshot
         run: npm run collect:snapshot
