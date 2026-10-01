@@ -236,6 +236,19 @@ function bookFeatures(book) {
     microPriceOffsetPct = mid > 0 && microPrice != null ? ((microPrice - mid) / mid) * 100 : null;
   }
 
+  const bidNotionals = bids.map(([price, qty]) => price * qty);
+  const askNotionals = asks.map(([price, qty]) => price * qty);
+  const bidDepth5 = bidNotionals.slice(0, 5).reduce((s, x) => s + x, 0);
+  const askDepth5 = askNotionals.slice(0, 5).reduce((s, x) => s + x, 0);
+  const bidDepth20 = bidNotionals.reduce((s, x) => s + x, 0);
+  const askDepth20 = askNotionals.reduce((s, x) => s + x, 0);
+  const bidTop1SharePct = bidDepth5 > 0 ? (bidNotionals[0] / bidDepth5) * 100 : null;
+  const askTop1SharePct = askDepth5 > 0 ? (askNotionals[0] / askDepth5) * 100 : null;
+  const largeBidThreshold = bidDepth5 > 0 ? bidDepth5 * 0.30 : 0;
+  const largeAskThreshold = askDepth5 > 0 ? askDepth5 * 0.30 : 0;
+  const largeBidNotional = bidNotionals.filter(x => x >= largeBidThreshold).reduce((s, x) => s + x, 0);
+  const largeAskNotional = askNotionals.filter(x => x >= largeAskThreshold).reduce((s, x) => s + x, 0);
+
   return {
     bids: bids.slice(0, ORDERBOOK_LIMIT).map(x => ({ price: x[0], qty: x[1] })),
     asks: asks.slice(0, ORDERBOOK_LIMIT).map(x => ({ price: x[0], qty: x[1] })),
@@ -245,6 +258,13 @@ function bookFeatures(book) {
     imbalanceL20Pct: l20.pct,
     depthNotionalL5: l5.depth,
     depthNotionalL20: l20.depth,
+    bidTop1SharePct,
+    askTop1SharePct,
+    largeBidNotional,
+    largeAskNotional,
+    largeOrderImbalancePct: (largeBidNotional + largeAskNotional) > 0
+      ? ((largeBidNotional - largeAskNotional) / (largeBidNotional + largeAskNotional)) * 100
+      : null,
     microPrice,
     microPriceOffsetPct
   };
@@ -270,6 +290,8 @@ function scoreMarket(m) {
   const micro = num(m.microPriceOffsetPct) ?? 0;
   const cross = num(m.crossExchangeBuyPct) ?? 0;
   const absorption = num(m.absorptionScore) ?? 0;
+  const largeOrders = num(m.largeOrderImbalancePct) ?? 0;
+  const depthPersistence = num(m.depthPersistenceScore) ?? 0;
   const spread = num(m.spreadPct) ?? 999;
   const breadth = num(m.marketBreadth5mPct) ?? 50;
   const btc5 = num(m.btcMomentum5m) ?? 0;
@@ -316,6 +338,16 @@ function scoreMarket(m) {
   if (absorption >= 0.5) add(8, "Satış baskısı emiliyor");
   else if (absorption >= 0.2) add(4, null);
   else if (absorption <= -0.5) add(-8, "Alış baskısı emiliyor", false);
+
+  if (largeOrders >= 20) add(7, "Büyük emirler alıcı lehine");
+  else if (largeOrders >= 8) add(4, null);
+  else if (largeOrders <= -20) add(-7, "Büyük emirler satıcı lehine", false);
+  else if (largeOrders <= -8) add(-4, null, false);
+
+  if (depthPersistence >= 0.35) add(6, "Alış derinliği korunuyor");
+  else if (depthPersistence >= 0.15) add(3, null);
+  else if (depthPersistence <= -0.35) add(-6, "Satış derinliği korunuyor", false);
+  else if (depthPersistence <= -0.15) add(-3, null, false);
 
   if (spread <= 0.05) add(5, "Dar alış-satış farkı");
   else if (spread <= 0.10) add(3, null);
@@ -366,6 +398,7 @@ function aggregateUniverse(bases, rows) {
       imbalancePct: null, imbalanceL1Pct: null, imbalanceL5Pct: null, imbalanceL20Pct: null,
       weightedImbalancePct: null, depthNotionalL5: null, depthNotionalL20: null,
       microPrice: null, microPriceOffsetPct: null, bids: [], asks: [],
+      largeOrderImbalancePct: null, depthPersistenceScore: null,
       exchangeData: {}, score: 50, signal: "WAIT", reasons: [], updatedAt: Date.now()
     });
   }
@@ -466,6 +499,11 @@ async function enrichDepth(markets, exchanges) {
           imbalanceL20Pct: f.imbalanceL20Pct,
           depthNotionalL5: f.depthNotionalL5,
           depthNotionalL20: f.depthNotionalL20,
+          bidTop1SharePct: f.bidTop1SharePct,
+          askTop1SharePct: f.askTop1SharePct,
+          largeBidNotional: f.largeBidNotional,
+          largeAskNotional: f.largeAskNotional,
+          largeOrderImbalancePct: f.largeOrderImbalancePct,
           microPrice: f.microPrice,
           microPriceOffsetPct: f.microPriceOffsetPct
         });
@@ -495,6 +533,7 @@ async function enrichDepth(markets, exchanges) {
     m.imbalanceL20Pct = preferred.imbalanceL20Pct;
     m.depthNotionalL5 = preferred.depthNotionalL5;
     m.depthNotionalL20 = preferred.depthNotionalL20;
+    m.largeOrderImbalancePct = preferred.largeOrderImbalancePct;
     m.microPrice = preferred.microPrice;
     m.microPriceOffsetPct = preferred.microPriceOffsetPct;
     scoreMarket(m);
@@ -551,6 +590,35 @@ function applyEntryFeatures(markets, previousState, now) {
 
     const priceMove = Number(m.priceChangePct5m || 0);
     const flow = Number(m.netFlowRatio5m || 0);
+
+    // Compare current visible L5 depth with the previous snapshot. This is
+    // intentionally called persistence, not true cancellation/replenishment:
+    // public REST snapshots cannot tell us the order IDs that changed.
+    const currentDepthByExchange = Object.fromEntries(
+      Object.entries(m.exchangeData || {})
+        .filter(([, venue]) => Number.isFinite(venue?.depthNotionalL5))
+        .map(([exchange, venue]) => [exchange, {
+          bid: Number(venue.depthNotionalL5 || 0) * (1 + Number(venue.imbalanceL5Pct || 0) / 100) / 2,
+          ask: Number(venue.depthNotionalL5 || 0) * (1 - Number(venue.imbalanceL5Pct || 0) / 100) / 2
+        }])
+    );
+    const previousDepth = previous?.depthByExchange || {};
+    const depthChanges = Object.entries(currentDepthByExchange).map(([exchange, currentDepth]) => {
+      const prevDepth = previousDepth[exchange];
+      if (!prevDepth) return null;
+      const bidBase = Math.max(Number(prevDepth.bid || 0), 1);
+      const askBase = Math.max(Number(prevDepth.ask || 0), 1);
+      const bidChange = (currentDepth.bid - Number(prevDepth.bid || 0)) / bidBase;
+      const askChange = (currentDepth.ask - Number(prevDepth.ask || 0)) / askBase;
+      return { bidChange, askChange };
+    }).filter(Boolean);
+    if (depthChanges.length) {
+      const avgBid = depthChanges.reduce((s, x) => s + x.bidChange, 0) / depthChanges.length;
+      const avgAsk = depthChanges.reduce((s, x) => s + x.askChange, 0) / depthChanges.length;
+      m.depthPersistenceScore = clamp((avgBid - avgAsk) / 2, -1, 1);
+    } else {
+      m.depthPersistenceScore = 0;
+    }
     // Positive value means aggressive selling failed to push price down
     // (potential bid-side absorption); negative means the opposite.
     m.absorptionScore = flow <= -0.15
@@ -802,6 +870,15 @@ async function runPaper(previous, markets, now) {
       netFlow5m: m.netFlow5m,
       buyPressure5mPct: m.buyPressure5mPct,
       imbalanceL5Pct: m.imbalanceL5Pct,
+      largeOrderImbalancePct: m.largeOrderImbalancePct,
+      depthByExchange: Object.fromEntries(
+        Object.entries(m.exchangeData || {})
+          .filter(([, venue]) => Number.isFinite(venue?.depthNotionalL5))
+          .map(([exchange, venue]) => [exchange, {
+            bid: Number(venue.depthNotionalL5 || 0) * (1 + Number(venue.imbalanceL5Pct || 0) / 100) / 2,
+            ask: Number(venue.depthNotionalL5 || 0) * (1 - Number(venue.imbalanceL5Pct || 0) / 100) / 2
+          }])
+      ),
       exchangePrices: Object.fromEntries(
         Object.entries(m.exchangeData || {}).map(([exchange, venue]) => [exchange, venue?.price]).filter(([, price]) => price != null)
       )
@@ -832,7 +909,8 @@ function compact(m) {
     relativeVolume5m: m.relativeVolume5m, netFlowRatio5m: m.netFlowRatio5m,
     priceChangePct15m: m.priceChangePct15m, priceChangePct30m: m.priceChangePct30m,
     priceChangePct60m: m.priceChangePct60m, crossExchangeBuyPct: m.crossExchangeBuyPct,
-    absorptionScore: m.absorptionScore, marketBreadth5mPct: m.marketBreadth5mPct,
+    absorptionScore: m.absorptionScore, largeOrderImbalancePct: m.largeOrderImbalancePct,
+    depthPersistenceScore: m.depthPersistenceScore, marketBreadth5mPct: m.marketBreadth5mPct,
     btcMomentum5m: m.btcMomentum5m, btcMomentum15m: m.btcMomentum15m,
     entryReady: m.entryReady, entryFilterPassCount: m.entryFilterPassCount,
     entryFilterTotal: m.entryFilterTotal, entryDecision: m.entryDecision,
