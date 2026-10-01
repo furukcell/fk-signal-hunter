@@ -31,12 +31,13 @@ async function loadUniverse() {
   try {
     const key = process.env.COINGECKO_API_KEY || "";
     const url = key
-      ? `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MAX_COINS}&page=1&sparkline=false&x_cg_demo_api_key=${encodeURIComponent(key)}`
-      : `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MAX_COINS}&page=1&sparkline=false`;
+      ? `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MAX_COINS + 20}&page=1&sparkline=false&x_cg_demo_api_key=${encodeURIComponent(key)}`
+      : `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MAX_COINS + 20}&page=1&sparkline=false`;
     const rows = await fetchJson(url);
     return rows.map(x => String(x.symbol || "").toUpperCase())
       .filter(Boolean)
-      .filter(x => !/^(USDT|USDC|BUSD|DAI|FDUSD|TUSD|USDE|USDD|PYUSD)$/.test(x));
+      .filter(x => !/^(USDT|USDC|BUSD|DAI|FDUSD|TUSD|USDE|USDD|PYUSD)$/.test(x))
+      .slice(0, MAX_COINS);
   } catch (error) {
     console.warn("CoinGecko unavailable; using exchange volume fallback:", error.message);
     return [];
