@@ -97,3 +97,8 @@
   .detailStats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .marketBoard .tableWrap{max-height:520px}
 }
+
+.priceChart{padding:0 17px 8px}
+.priceChart svg{width:100%;height:260px;display:block}
+.priceChart .line{fill:none;stroke:currentColor;stroke-width:2.5}
+.priceChartCard{margin-top:14px}
