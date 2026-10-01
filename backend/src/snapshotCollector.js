@@ -8,6 +8,9 @@ const ORDERBOOK_LIMIT = 20;
 const QUOTE = "USDT";
 const HISTORY_RETENTION_DAYS = 30;
 const EXCHANGE_IDS = ["binance","coinbase","upbit","okx","bybit","bitget","gate","kucoin","mexc","htx"];
+const BINANCE_PUBLIC_BASE = "https://data-api.binance.vision";
+const BYBIT_PUBLIC_BASE = "https://api.bybit.com";
+const BINANCE_TRADE_COINS = Number(process.env.SNAPSHOT_BINANCE_TRADE_COINS || 20);
 
 const num = value => {
   const n = Number(value);
@@ -66,6 +69,98 @@ function normalizeTicker(exchange, ticker, market, now) {
     priceChangePct24h: num(ticker.percentage),
     updatedAt: now
   };
+}
+
+async function fetchBinanceDirect(bases) {
+  const [ticker24h, bookTicker] = await Promise.all([
+    fetchJson(`${BINANCE_PUBLIC_BASE}/api/v3/ticker/24hr`),
+    fetchJson(`${BINANCE_PUBLIC_BASE}/api/v3/ticker/bookTicker`)
+  ]);
+  const bySymbol = new Map((ticker24h || []).map(x => [x.symbol, x]));
+  const books = new Map((bookTicker || []).map(x => [x.symbol, x]));
+  const now = Date.now();
+
+  return bases.map(base => {
+    const symbol = `${base}USDT`;
+    const t = bySymbol.get(symbol);
+    const b = books.get(symbol);
+    if (!t && !b) return null;
+    const last = num(t?.lastPrice);
+    const bid = num(b?.bidPrice);
+    const ask = num(b?.askPrice);
+    return {
+      exchange: "binance",
+      symbol,
+      baseAsset: base,
+      quoteAsset: "USDT",
+      price: last ?? (bid != null && ask != null ? (bid + ask) / 2 : null),
+      bid,
+      ask,
+      spreadPct: bid != null && ask != null && bid > 0 && ask >= bid ? ((ask - bid) / bid) * 100 : null,
+      quoteVolume24h: num(t?.quoteVolume) ?? 0,
+      volume24h: num(t?.volume) ?? 0,
+      priceChangePct24h: num(t?.priceChangePercent),
+      updatedAt: now,
+      source: "binance-public-rest"
+    };
+  }).filter(Boolean);
+}
+
+async function fetchBybitDirect(bases) {
+  const data = await fetchJson(`${BYBIT_PUBLIC_BASE}/v5/market/tickers?category=spot`);
+  const bySymbol = new Map((data?.result?.list || []).map(x => [x.symbol, x]));
+  const now = Date.now();
+  return bases.map(base => {
+    const symbol = `${base}USDT`;
+    const t = bySymbol.get(symbol);
+    if (!t) return null;
+    const bid = num(t.bid1Price);
+    const ask = num(t.ask1Price);
+    return {
+      exchange: "bybit",
+      symbol,
+      baseAsset: base,
+      quoteAsset: "USDT",
+      price: num(t.lastPrice) ?? (bid != null && ask != null ? (bid + ask) / 2 : null),
+      bid,
+      ask,
+      spreadPct: bid != null && ask != null && bid > 0 && ask >= bid ? ((ask - bid) / bid) * 100 : null,
+      quoteVolume24h: num(t.turnover24h) ?? 0,
+      volume24h: num(t.volume24h) ?? 0,
+      priceChangePct24h: num(t.price24hPcnt) != null ? num(t.price24hPcnt) * 100 : null,
+      updatedAt: now,
+      source: "bybit-public-rest"
+    };
+  }).filter(Boolean);
+}
+
+async function fetchBinanceTradeFlow(markets) {
+  const targets = markets
+    .slice()
+    .sort((a, b) => (b.exchangeData?.binance?.quoteVolume24h || 0) - (a.exchangeData?.binance?.quoteVolume24h || 0))
+    .slice(0, BINANCE_TRADE_COINS);
+
+  const results = await mapConcurrent(targets, 6, async m => {
+    const trades = await fetchJson(`${BINANCE_PUBLIC_BASE}/api/v3/trades?symbol=${encodeURIComponent(m.symbol)}&limit=100`);
+    let buyQuote = 0;
+    let sellQuote = 0;
+    let latest = null;
+    for (const t of trades || []) {
+      const quote = num(t.quoteQty) ?? ((num(t.price) || 0) * (num(t.qty) || 0));
+      if (t.isBuyerMaker) sellQuote += quote;
+      else buyQuote += quote;
+      latest = Math.max(latest || 0, Number(t.time) || 0);
+    }
+    const total = buyQuote + sellQuote;
+    return {
+      symbol: m.symbol,
+      buyPressurePct: total > 0 ? (buyQuote / total) * 100 : null,
+      flowVolume: total || null,
+      trades: (trades || []).length,
+      lastTradeAt: latest || null
+    };
+  });
+  return results.filter(Boolean);
 }
 
 async function fetchTickers(exchange, symbols) {
@@ -213,6 +308,13 @@ function aggregateUniverse(bases, rows) {
     }
 
     m.staleExchangeCount = Math.max(0, m.exchangeCount - m.activeExchangeCount);
+    const binanceFlow = m.binanceFlow;
+    if (binanceFlow) {
+      m.buyPressurePct = binanceFlow.buyPressurePct;
+      m.flowVolume = binanceFlow.flowVolume;
+      m.trades = binanceFlow.trades;
+      m.lastTradeAt = binanceFlow.lastTradeAt;
+    }
     scoreMarket(m);
   }
   return [...map.values()];
@@ -337,6 +439,25 @@ async function main() {
   const exchanges = [];
   const rows = [];
 
+  // Binance and Bybit are our primary public market-data sources.
+  // They require no API key and are used before CCXT so a CCXT outage
+  // does not silently remove these two important venues.
+  try {
+    const direct = await fetchBinanceDirect(bases);
+    rows.push(...direct);
+    console.log(`binance direct: ${direct.length} tickers`);
+  } catch (error) {
+    console.error(`binance direct failed: ${error.message}`);
+  }
+
+  try {
+    const direct = await fetchBybitDirect(bases);
+    rows.push(...direct);
+    console.log(`bybit direct: ${direct.length} tickers`);
+  } catch (error) {
+    console.error(`bybit direct failed: ${error.message}`);
+  }
+
   for (const id of EXCHANGE_IDS) {
     try {
       const exchange = makeExchange(id);
@@ -358,6 +479,16 @@ async function main() {
     bases = [...new Set(rows.map(x => x.baseAsset))].slice(0, MAX_COINS);
   }
   let markets = aggregateUniverse(bases.slice(0, MAX_COINS), rows);
+
+  try {
+    const flow = await fetchBinanceTradeFlow(markets);
+    const bySymbol = new Map(flow.map(x => [x.symbol, x]));
+    for (const m of markets) m.binanceFlow = bySymbol.get(m.symbol) || null;
+    console.log(`binance direct trade flow: ${flow.length} markets`);
+  } catch (error) {
+    console.error(`binance trade flow failed: ${error.message}`);
+  }
+
   await enrichDepth(markets, exchanges);
 
   for (const m of markets) m.opportunity = buildOpportunity(m);
@@ -365,15 +496,18 @@ async function main() {
   const previous = await firebase.read("public", "paperState");
   const paper = await runPaper(previous?.payload ? JSON.parse(previous.payload) : null, markets, now);
 
-  markets = markets.sort((a, b) => b.score - a.score).slice(0, MAX_COINS);
+  const rankedMarkets = markets.slice().sort((a, b) => b.score - a.score);
   const payload = {
     generatedAt: new Date(now).toISOString(), intervalMinutes: 5, universeSize: markets.length,
     exchanges: EXCHANGE_IDS, markets: markets.map(compact),
-    signals: markets.filter(m => m.signal !== "WAIT").slice(0, 50),
+    signals: rankedMarkets.filter(m => m.signal !== "WAIT").slice(0, 50),
     paper,
     health: {
       collector: "github-actions", durationMs: Date.now() - startedAt,
       exchangeRows: rows.length, exchangesWithData: new Set(rows.map(x => x.exchange)).size,
+      binanceDirect: rows.some(x => x.exchange === "binance" && x.source === "binance-public-rest"),
+      bybitDirect: rows.some(x => x.exchange === "bybit" && x.source === "bybit-public-rest"),
+      binanceTradeFlowMarkets: markets.filter(m => m.binanceFlow).length,
       depthMarkets: markets.filter(m => m.bids.length || m.asks.length).length,
       freeMode: true
     }
