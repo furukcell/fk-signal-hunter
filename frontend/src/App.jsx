@@ -384,7 +384,7 @@ function FlowChart({history}){
 function Signals({data,analytics}){
   const rows=[...(data?.markets||[])].sort((a,b)=>(b.score||0)-(a.score||0));
   const map=new Map((analytics?.markets||[]).map(x=>[x.symbol,x]));
-  return <section className="card tableCard"><div className="head"><div><small>GÜNCEL DURUM</small><h2>Sinyal Radarı</h2></div><span className="tag">İLK 100</span></div><div className="tableWrap"><table><thead><tr><th>PARİTE</th><th>SKOR</th><th>SON 5 DK</th><th>ALICI AKIŞI</th><th>EMİR DEFTERİ</th><th>24 SAAT MOM.</th><th>BORSALAR</th><th>24 SAAT FIRSAT</th><th>DURUM</th></tr></thead><tbody>{rows.map(m=>{const h=map.get(m.symbol);return <tr key={m.symbol}><td><b>{m.symbol.replace("USDT","/USDT")}</b></td><td><Score n={m.score}/></td><td className={(m.priceChangePct5m||0)>0?"positive":(m.priceChangePct5m||0)<0?"negative":""}>{pct(m.priceChangePct5m,3)}</td><td>{pct(m.buyPressurePct,1)}</td><td>{pct(m.weightedImbalancePct,1)}</td><td>{pct(m.priceChangePct24h,2)}</td><td>{marketCount(m)}/10</td><td>{h?.opportunities24h??0}</td><td><label className={"tag "+(m.score>=82?"good":"")}>{m.score>=82?"FIRSAT":m.score>=70?"TAKİP":"BEKLE"}</label></td></tr>})}</tbody></table></div></section>;
+  return <section className="card tableCard"><div className="head"><div><small>GÜNCEL DURUM</small><h2>Sinyal Radarı</h2></div><span className="tag">İLK 100</span></div><div className="tableWrap"><table><thead><tr><th>PARİTE</th><th>SKOR</th><th>SON 5 DK</th><th>ALICI AKIŞI</th><th>EMİR DEFTERİ L5</th><th>HACİM ANOMALİSİ</th><th>BORSALAR</th><th>GİRİŞ MOTORU</th><th>DURUM</th></tr></thead><tbody>{rows.map(m=>{const h=map.get(m.symbol);return <tr key={m.symbol}><td><b>{m.symbol.replace("USDT","/USDT")}</b></td><td><Score n={m.score}/></td><td className={(m.priceChangePct5m||0)>0?"positive":(m.priceChangePct5m||0)<0?"negative":""}>{pct(m.priceChangePct5m,3)}</td><td>{pct(m.buyPressurePct,1)}</td><td>{pct(m.imbalanceL5Pct??m.weightedImbalancePct,1)}</td><td>{m.relativeVolume5m==null?"—":m.relativeVolume5m.toFixed(2)+"x"}</td><td>{marketCount(m)}/10</td><td><label className={"tag "+(m.entryReady?"good":"")}>{m.entryReady?"AL ADAYI":m.score>=82?"FİLTREDE":"BEKLE"}</label></td><td><label className={"tag "+(m.score>=82?"good":"")}>{m.score>=82?"FIRSAT":m.score>=70?"TAKİP":"BEKLE"}</label></td></tr>})}</tbody></table></div></section>;
 }
 
 function OpportunityTable({analytics,limit=20}){
@@ -421,15 +421,31 @@ function Trades({paper,paperTrades,paperTradesError}){
 
 function ScoreEngine(){
   const rows=[
-    ["24 saatlik momentum","±10","Fiyatın son 24 saatteki yönü"],
-    ["Likidite","+8 / +4","24 saatlik işlem hacmi"],
-    ["Borsa kapsamı","+7 / +4 / -8","Kaç borsada sağlıklı fiyat var"],
-    ["Fiyat dağılımı","±4","Borsalar arası fiyat farkı"],
-    ["Emir defteri","±12","Top depth bid/ask dengesi"],
-    ["Alış-satış farkı","+4 / -5","İşlem maliyeti / likidite kalitesi"],
-    ["Alıcı baskısı","±10","Binance son işlem örneklemindeki alıcı baskısı"]
+    ["5 dk net para akışı","+12 / -12","Agresif alıcı-satıcı para dengesinin yönü"],
+    ["5 dk hacim anomalisi","+10 / -4","Son 5 dk hacmi, Binance 24 saatlik hacmin normal 5 dk seviyesine göre"],
+    ["5 dk momentum","+10 / -10","En son taramaya göre kısa vadeli fiyat yönü"],
+    ["15 dk trend","+8 / -8","Kısa trendin devam teyidi"],
+    ["30 dk / 1 saat trend","+8 / -8","Daha geniş kısa vadeli yön teyidi"],
+    ["L5 emir defteri","+10 / -10","İlk 5 fiyat seviyesindeki gerçek derinlik dengesi"],
+    ["Mikro fiyat","+6 / -6","En iyi alış/satış miktarlarının ima ettiği fiyat yönü"],
+    ["Borsa teyidi","+8 / -6","Kaç borsada fiyat aynı yönde hareket ediyor"],
+    ["Satış emilimi","+8 / -8","Güçlü satışa rağmen fiyatın düşmemesi"],
+    ["Spread / likidite","+9 / -7","İşlem maliyetinin ve likiditenin uygunluğu"],
+    ["Piyasa genişliği","+4 / -4","İlk 100 coin'in kaçının aynı anda yükseldiği"],
+    ["BTC piyasa rejimi","+3 / -8","Altcoin işlemlerinde BTC'nin kısa vadeli yön filtresi"]
   ];
-  return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “FIRSAT fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>MEVCUT FORMÜL</small><h2>Skor Motoru</h2></div><span className="tag">PROTOTİP</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu skor tek başına kullanılmayacak. 5 dakikalık momentum, hacim anomalisi, gerçek işlem akışı, kayma, volatilite, borsalar arası teyit ve risk kuralları ayrı bir giriş motorunda test edilecek.</p></section></>;
+  const filters=[
+    "Skor en az 82",
+    "En az 3 aktif borsa",
+    "24 saatlik hacim en az 10M",
+    "Spread en fazla %0,15",
+    "5 dk net akış pozitif",
+    "5 dk hacim normalin üzerinde",
+    "5 dk momentum pozitif",
+    "L5 emir defteri en az %5 alıcı lehine",
+    "Borsaların en az %50'si yukarı teyit veriyor"
+  ];
+  return <><div className="notice"><Gauge size={17}/><div><b>Giriş Motoru V2 prototip.</b> Skor tek başına alım emri vermiyor. Skor 82+ olsa bile aşağıdaki giriş filtrelerinin tamamı geçilmeden simülasyon işlem açmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>ÇOKLU VERİ MOTORU</small><h2>Skor Motoru</h2></div><span className="tag">V2 PROTOTİP</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card tableCard"><div className="head"><div><small>ALIM KARARI FİLTRELERİ</small><h2>Giriş koşulları</h2></div><span className="tag">9 FİLTRE</span></div><div className="formulaGrid">{filters.map((x,i)=><div key={x}><b>{i+1}. koşul</b><strong>GEREKLİ</strong><span>{x}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Bu ağırlıklar kesin sonuç değil</h2><p>İlk aşamada bunlar araştırma ve piyasa mikro yapısı bulgularından türetilmiş başlangıç ağırlıkları. Sistem yeterli işlem biriktirdiğinde 82–84, 85–89 ve 90+ skor gruplarının gerçek net sonuçlarını karşılaştırıp ağırlıkları veriye göre yeniden ayarlayacağız.</p></section></>;
 }
 
 function Risk({data}){
@@ -442,7 +458,7 @@ function Risk({data}){
       <Stat icon={Activity} label="Borsa Verisi" value={(h.exchangesWithData??0)+"/10"} detail="Tarama kapsamı"/>
       <Stat icon={Bot} label="Mod" value="SİMÜLASYON" detail="Gerçek emir yok"/>
     </div>
-    <section className="card empty"><ShieldCheck size={24}/><h2>Risk ve işlem kuralları</h2><p>Başlangıç kasa: 1.000 TL · İşlem büyüklüğü: %10 · Kâr hedefi: +%1 · Zarar kes: -%0,8 · Kaldıraç yok · Gerçek emir yok · Günlük işlem sayısı limiti yok.</p></section>
+    <section className="card empty"><ShieldCheck size={24}/><h2>Risk ve işlem kuralları</h2><p>Başlangıç kasa: 1.000 TL · İşlem büyüklüğü: %10 · Kâr hedefi: +%1 · Zarar kes: -%0,8 · Kaldıraç yok · Gerçek emir yok · Günlük işlem sayısı limiti yok. Alım için skor + akış + hacim + momentum + emir defteri + borsa teyidi birlikte aranıyor.</p></section>
   </>;
 }
 
