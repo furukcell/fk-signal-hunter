@@ -421,7 +421,7 @@ function ScoreEngine(){
     ["Borsa kapsamı","+7 / +4 / -8","Kaç borsada sağlıklı fiyat var"],
     ["Fiyat dağılımı","±4","Borsalar arası fiyat farkı"],
     ["Emir defteri","±12","Top depth bid/ask dengesi"],
-    ["Spread","+4 / -5","İşlem maliyeti / likidite kalitesi"],
+    ["Alış-satış farkı","+4 / -5","İşlem maliyeti / likidite kalitesi"],
     ["Alıcı baskısı","±10","Binance son işlem örneklemindeki alıcı baskısı"]
   ];
   return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “FIRSAT fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>MEVCUT FORMÜL</small><h2>Skor Motoru</h2></div><span className="tag">PROTOTİP</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu skor tek başına kullanılmayacak. 5 dakikalık momentum, hacim anomalisi, gerçek işlem akışı, kayma, volatilite, borsalar arası teyit ve risk kuralları ayrı bir giriş motorunda test edilecek.</p></section></>;

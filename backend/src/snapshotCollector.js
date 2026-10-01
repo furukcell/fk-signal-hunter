@@ -482,7 +482,9 @@ async function runPaper(previous, markets, now) {
       returnPct: p.quoteCost > 0 ? (netPnl / p.quoteCost) * 100 : 0,
       closedAt: now,
       holdingMinutes: Math.max(0, (now - p.openedAt) / 60000),
-      reason: hitTp ? "TP_1PCT" : "SL_0_8PCT"
+      reason: hitTp ? "TP_1PCT" : "SL_0_8PCT",
+      exitType: hitTp ? "KAR_HEDEFI" : "ZARAR_KES",
+      scoreAtEntry: p.score
     };
 
     closedTrades.push(trade);
@@ -570,11 +572,27 @@ async function runPaper(previous, markets, now) {
   state.availableCash = state.balance;
   state.openPositionValue = openValue;
   state.unrealizedPnl = openValue - state.positions.reduce((sum, p) => sum + (p.quoteCost || 0), 0);
-  const todayStart = new Date(now);
-  todayStart.setUTCHours(0, 0, 0, 0);
-  const todayTrades = state.trades.filter(t => Number(t.closedAt) >= todayStart.getTime());
+  const todayKey = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Istanbul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(now));
+  const todayTrades = state.trades.filter(t => {
+    if (!t.closedAt) return false;
+    const tradeKey = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Istanbul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(new Date(Number(t.closedAt)));
+    return tradeKey === todayKey;
+  });
   state.todayTrades = todayTrades.length;
   state.todayPnl = todayTrades.reduce((sum, t) => sum + (Number(t.netPnl) || 0), 0);
+  state.grossProfit = state.trades.filter(t => Number(t.netPnl) > 0).reduce((sum, t) => sum + Number(t.netPnl), 0);
+  state.grossLoss = Math.abs(state.trades.filter(t => Number(t.netPnl) < 0).reduce((sum, t) => sum + Number(t.netPnl), 0));
+  state.profitFactor = state.grossLoss > 0 ? state.grossProfit / state.grossLoss : null;
   state.positionSizePct = 10;
   state.takeProfitPct = 1;
   state.stopLossPct = -0.8;
