@@ -1,20 +1,20 @@
 import {useEffect,useMemo,useState} from "react";
-import {Activity,BarChart3,Bot,Gauge,LayoutDashboard,ListFilter,Menu,RefreshCw,Settings,ShieldCheck,Signal,Target,TrendingUp,Wallet,X} from "lucide-react";
+import {Activity,BarChart3,Bot,Gauge,LayoutDashboard,ListFilter,Menu,RefreshCw,Ayarlar,ShieldCheck,Signal,Target,TrendingUp,Wallet,X} from "lucide-react";
 
 const nav=[
   ["Ana Sayfa",LayoutDashboard],
   ["24 Saatlik Tarama",TrendingUp],
   ["Sinyaller",Signal],
-  ["İşlemler",ListFilter],
+  ["İşlem Geçmişi",ListFilter],
   ["Performans",BarChart3],
   ["Skor Motoru",Gauge],
   ["Risk",ShieldCheck],
-  ["Ayarlar",Settings]
+  ["Ayarlar",Ayarlar]
 ];
 
 const SNAPSHOT_URL="https://firestore.googleapis.com/v1/projects/fk-signal-hunter/databases/(default)/documents/public/latest";
 
-async function fetchSnapshot(){
+async function fetchTarama(){
   const res=await fetch(SNAPSHOT_URL,{cache:"no-store"});
   if(!res.ok) throw new Error("Veri alınamadı");
   const doc=await res.json();
@@ -29,7 +29,11 @@ function Stat({icon:Icon,label,value,detail}){
 function Score({n}){const x=Number(n||0);return <span className={"score "+(x>=82?"high":x>=70?"mid":"low")}>{x}</span>;}
 function pct(n,d=1){return n==null?"—":Number(n).toFixed(d)+"%";}
 function price(n){return n==null?"—":Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4});}
-function fmtDate(ts){return ts?new Date(ts).toLocaleString("tr-TR",{hour:"2-digit",minute:"2-digit"}):"—";}
+function fmtDate(ts){return ts?new Date(ts).toLocaleString("tr-TR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";}
+
+function money(n,d=2){return Number(n||0).toLocaleString("tr-TR",{minimumFractionDigits:d,maximumFractionDigits:d})+" TL";}
+function fmtMinutes(n){return n==null?"—":Number(n)<60?Number(n).toFixed(0)+" dk":(Number(n)/60).toFixed(1)+" sa";}
+
 function marketCount(m){return m?.activeExchangeCount??m?.exchangeCount??0;}
 
 export default function App(){
@@ -43,7 +47,7 @@ export default function App(){
     let alive=true;
     const load=async()=>{
       try{
-        const d=await fetchSnapshot();
+        const d=await fetchTarama();
         const preferred=market?.symbol;
         const next=d.markets?.find(x=>x.symbol===preferred)??d.markets?.[0]??null;
         if(alive){setData(d);setMarket(next);setError(null);}
@@ -73,48 +77,84 @@ export default function App(){
         {tab==="Ana Sayfa"&&<Dashboard data={data} market={market} selectMarket={selectMarket}/>}
         {tab==="24 Saatlik Tarama"&&<Scanner analytics={analytics} markets={markets} selectMarket={selectMarket}/>}
         {tab==="Sinyaller"&&<Signals data={data} analytics={analytics}/>}
-        {tab==="İşlemler"&&<Trades paper={data?.paper}/>}
+        {tab==="İşlem Geçmişi"&&<Trades paper={data?.paper}/>}
         {tab==="Performans"&&<Performance paper={data?.paper}/>}
         {tab==="Skor Motoru"&&<ScoreEngine/>}
         {tab==="Risk"&&<Risk data={data}/>}
-        {tab==="Ayarlar"&&<SettingsPage/>}
+        {tab==="Ayarlar"&&<AyarlarPage/>}
       </section>
     </main>
   </div>;
 }
 
 function Dashboard({data,market,selectMarket}){
-  const a=data?.analytics24h;
-  const s=a?.summary||{};
-  const score=market?.score??0;
+  const a=data?.analytics24h,s=a?.summary||{},paper=data?.paper||{},trades=paper.trades||[];
   return <>
-    <div className="notice"><Activity size={17}/><div><b>Bu ekran artık sadece “şu an”ı göstermiyor.</b> Her 5 dakikada tüm 100 coin taranıyor; 82+ skor eşiğini geçen fırsatlar kaydediliyor ve 30 dk / 1 saat / 2 saat sonraki fiyat sonucu ölçülüyor.</div></div>
+    <PaperHeader paper={paper}/>
+    <div className="notice"><Wallet size={17}/><div><b>Bu kasa tamamen sanaldır.</b> Bot uygun gördüğü fırsatlarda mevcut kasanın %10'u ile işlem açar. Hedef +%1, zarar kes -%0,8. Gerçek emir gönderilmez.</div></div>
     <div className="stats">
-      <Stat icon={Wallet} label="Simülasyon Bakiyesi" value={(data?.paper?.equity??1000).toFixed(2)+" TL"} detail={"Başlangıçtan itibaren"}/>
-      <Stat icon={Target} label="24H Fırsat" value={s.totalOpportunities24h??0} detail="Skor ≥ 82"/>
-      <Stat icon={TrendingUp} label="30 Dakika Pozitif" value={pct(s.positiveRate30m)} detail={(s.ölçüldü30m??0)+" ölçüldü"}/>
-      <Stat icon={TrendingUp} label="1 Saat Pozitif" value={pct(s.positiveRate1h)} detail={(s.resolved1h??0)+" resolved"}/>
-      <Stat icon={Gauge} label="2 Saat Ortalaması" value={pct(s.avgReturn2h,3)} detail={(s.resolved2h??0)+" resolved"}/>
+      <Stat icon={Target} label="Bugünkü İşlem" value={paper.todayTrades??0} detail="Kapanan işlemler"/>
+      <Stat icon={TrendingUp} label="Bugünkü K/Z" value={money(paper.todayPnl)} detail="Gerçekleşmiş"/>
+      <Stat icon={Gauge} label="Kazanma Oranı" value={paper.winRate==null?"—":pct(paper.winRate,1)} detail={(paper.wins??0)+" kazanç / "+(paper.losses??0)+" zarar"}/>
+      <Stat icon={ShieldCheck} label="Maksimum Düşüş" value={pct(paper.maxDrawdownPct)} detail="Kasa bazlı"/>
+      <Stat icon={Activity} label="24 Saat Fırsat" value={s.totalOpportunities24h??0} detail="Skor 82+"/>
     </div>
     <div className="two">
       <section className="card chartCard">
-        <div className="head"><div><small>24 SAAT / 15 DK ÖRNEKLEME</small><h2>Skor Geçmişi</h2></div><select value={market?.symbol||""} onChange={e=>selectMarket(e.target.value)}>{(data?.markets||[]).map(m=><option key={m.symbol} value={m.symbol}>{m.symbol.replace("USDT","/USDT")}</option>)}</select></div>
-        <ScoreChart points={a?.scorePoints||[]} symbol={market?.symbol}/>
-        <div className="chartLegend"><span><i/> {market?.symbol?.replace("USDT","/USDT")||"—"} skor</span><span>FIRSAT ≥ 82</span></div>
+        <div className="head"><div><small>KASA GEÇMİŞİ</small><h2>1.000 TL nasıl değişti?</h2></div><span className="tag">5 DK</span></div>
+        <EquityChart history={paper.equityHistory||[]} initial={paper.initialBalance||1000}/>
       </section>
-      <section className="card risk">
-        <div className="head"><div><small>SEÇİLİ COIN</small><h2>{market?.symbol?.replace("USDT","/USDT")||"—"}</h2></div><Score n={score}/></div>
-        <div className="decision"><Score n={score}/><div><b>{score>=82?"FIRSAT":score>=70?"TAKİP":"BEKLE"}</b><span>Bu skor henüz “garantili alım” anlamına gelmez.</span></div></div>
-        <Row label="Alıcı baskısı" value={pct(market?.buyPressurePct)} width={market?.buyPressurePct??0}/>
-        <Row label="Emir defteri dengesi" value={pct(market?.weightedImbalancePct)} width={Math.min(100,Math.abs(market?.weightedImbalancePct||0)*2.5)}/>
-        <Row label="24 saatlik momentum" value={pct(market?.priceChangePct24h)} width={Math.min(100,Math.abs(market?.priceChangePct24h||0)*20)}/>
-        <Row label="Alış-satış farkı" value={pct(market?.spreadPct,3)} width={Math.min(100,(market?.spreadPct||0)*500)}/>
-        <footer>Son snapshot: {fmtDate(data?.generatedAt)}</footer>
+      <section className="card">
+        <div className="head"><div><small>AÇIK POZİSYONLAR</small><h2>Şu an devam eden işlemler</h2></div><span className="tag">{paper.positions?.length||0} açık</span></div>
+        <OpenPositions positions={paper.positions||[]} markets={data?.markets||[]}/>
       </section>
     </div>
-    <OpportunityTable analytics={a} limit={10}/>
+    <div className="two">
+      <section className="card">
+        <div className="head"><div><small>SEÇİLİ COIN</small><h2>{market?.symbol?.replace("USDT","/USDT")||"—"}</h2></div><select value={market?.symbol||""} onChange={e=>selectMarket(e.target.value)}>{(data?.markets||[]).map(m=><option key={m.symbol} value={m.symbol}>{m.symbol}</option>)}</select></div>
+        <div className="signalBox"><Score n={market?.score}/><div><b>{market?.score>=82?"FIRSAT":market?.score>=70?"TAKİP":"BEKLE"}</b><span>{(market?.reasons||[]).join(" · ")||"Henüz yeterli veri yok"}</span></div></div>
+        <MiniRow label="Alıcı baskısı" value={pct(market?.buyPressurePct,1)}/>
+        <MiniRow label="Emir defteri dengesi" value={pct(market?.weightedImbalancePct,1)}/>
+        <MiniRow label="24 saatlik momentum" value={pct(market?.priceChangePct24h,2)}/>
+        <MiniRow label="Alış-satış farkı" value={pct(market?.spreadPct,3)}/>
+      </section>
+      <section className="card">
+        <div className="head"><div><small>SON KAPANAN İŞLEMLER</small><h2>İşlem Geçmişi</h2></div><span className="tag">{paper.totalTrades??trades.length} işlem</span></div>
+        <TradeRows trades={trades.slice(0,6)}/>
+      </section>
+    </div>
   </>;
 }
+
+function PaperHeader({paper}){
+  return <div className="paperHero card">
+    <div><small>TOPLAM SANAL KASA</small><h2>{money(paper.equity??paper.initialBalance??1000)}</h2><span>Başlangıç: {money(paper.initialBalance??1000)}</span></div>
+    <div><small>KULLANILABİLİR NAKİT</small><strong>{money(paper.availableCash??paper.balance??1000)}</strong><span>Yeni işlem için hazır</span></div>
+    <div><small>GERÇEKLEŞMİŞ K/Z</small><strong className={(paper.realizedPnl||0)>=0?"positive":"negative"}>{money(paper.realizedPnl)}</strong><span>{pct(paper.returnPct)} toplam getiri</span></div>
+    <div><small>AÇIK POZİSYON</small><strong>{paper.positions?.length||0}</strong><span>{paper.positions?.length?"İşlem devam ediyor":"Şu an açık işlem yok"}</span></div>
+  </div>;
+}
+
+function OpenPositions({positions,markets}){
+  if(!positions.length)return <div className="emptySmall"><Wallet size={22}/><b>Açık pozisyon yok</b><span>Yeni uygun fırsat geldiğinde %10'luk sanal işlem açılabilir.</span></div>;
+  return <div className="positionList">{positions.map(p=>{const m=markets.find(x=>x.symbol===p.symbol),mark=m?.exchangeData?.[p.exchange]?.bid??m?.bid??p.entryPrice,r=((mark-p.entryPrice)/p.entryPrice)*100;return <div className="position" key={p.id}><div><b>{p.symbol.replace("USDT","/USDT")}</b><span>Skor {p.score} · {p.exchange}</span></div><div><b>{money(p.quoteCost)}</b><span className={r>=0?"positive":"negative"}>{pct(r)} açık K/Z</span></div></div>})}</div>;
+}
+
+function TradeRows({trades}){
+  if(!trades.length)return <div className="emptySmall"><ListFilter size={22}/><b>Henüz kapanan işlem yok</b><span>Bot ilk uygun fırsatı bulduğunda burada görünecek.</span></div>;
+  return <div className="tradeList">{trades.map(t=><div className="tradeRow" key={t.id}><div><b>{t.symbol.replace("USDT","/USDT")}</b><span>{fmtDate(t.closedAt)} · Skor {t.score}</span></div><div><span>{t.reason==="TP_1PCT"?"%1 kâr":"-%0,8 zarar"}</span><span>{fmtMinutes(t.holdingMinutes)}</span></div><strong className={t.netPnl>=0?"positive":"negative"}>{t.netPnl>=0?"+":""}{Number(t.netPnl||0).toFixed(3)} TL</strong></div>)}</div>;
+}
+
+function EquityChart({history,initial}){
+  const points=history.slice(-120);
+  if(points.length<2)return <div className="chartEmpty"><BarChart3 size={24}/><b>Kasa grafiği oluşuyor</b><span>Her 5 dakikalık taramada bir kasa noktası kaydedilecek.</span></div>;
+  const w=900,h=240,p=28,vals=points.map(x=>Number(x.equity)||initial),min=Math.min(initial,...vals),max=Math.max(initial,...vals),range=max-min||1;
+  const line=vals.map((v,i)=>{const x=p+i/(vals.length-1)*(w-p*2),y=h-p-(v-min)/range*(h-p*2);return (i?"L":"M")+" "+x.toFixed(1)+" "+y.toFixed(1)}).join(" ");
+  const initialY=h-p-(initial-min)/range*(h-p*2);
+  return <div className="equityChart"><svg viewBox={"0 0 "+w+" "+h}><line x1={p} x2={w-p} y1={initialY} y2={initialY} className="baseline"/><path d={line} className="line"/></svg><div><span>{money(vals[0])}</span><span>Başlangıç: {money(initial)}</span><span>{money(vals[vals.length-1])}</span></div></div>;
+}
+
+function MiniRow({label,value}){return <div className="miniRow"><span>{label}</span><b>{value}</b></div>;}
 
 function Scanner({analytics,markets,selectMarket}){
   const rows=useMemo(()=>[...(analytics?.markets||[])].sort((a,b)=>(b.opportunities24h-a.opportunities24h)||((b.score||0)-(a.score||0))),[analytics]);
@@ -178,7 +218,7 @@ function ScoreEngine(){
     ["Spread","+4 / -5","İşlem maliyeti / likidite kalitesi"],
     ["Alıcı baskısı","±10","Binance son işlem örneklemindeki alıcı baskısı"]
   ];
-  return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “WATCH fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>MEVCUT FORMÜL</small><h2>Skor Motoru</h2></div><span className="tag">PROTOTİP</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu skor tek başına kullanılmayacak. 5 dakikalık momentum, hacim anomalisi, gerçek işlem akışı, kayma, volatilite, borsalar arası teyit ve risk kuralları ayrı bir giriş motorunda test edilecek.</p></section></>;
+  return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “FIRSAT fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>MEVCUT FORMÜL</small><h2>Skor Motoru</h2></div><span className="tag">PROTOTİP</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu skor tek başına kullanılmayacak. 5 dakikalık momentum, hacim anomalisi, gerçek işlem akışı, kayma, volatilite, borsalar arası teyit ve risk kuralları ayrı bir giriş motorunda test edilecek.</p></section></>;
 }
 
 function Risk({data}){
@@ -195,8 +235,8 @@ function Risk({data}){
   </>;
 }
 
-function SettingsPage(){
-  return <><div className="notice"><Settings size={17}/><div><b>Ücretsiz mod.</b> Harici zamanlayıcı + GitHub Actions kullanılıyor; piyasa verileri herkese açık API'lerden geliyor.</div></div><section className="card empty"><Settings size={24}/><h2>Sistem Ayarları</h2><p>Tarama: 5 dk · Skor geçmişi: 15 dk · Kâr hedefi: +%1 · Zarar kes: -%0,8 · İşlem büyüklüğü: %10 · Kasa: 1.000 TL · Geçmiş: 30 gün.</p></section></>;
+function AyarlarPage(){
+  return <><div className="notice"><Ayarlar size={17}/><div><b>Ücretsiz mod.</b> Harici zamanlayıcı + GitHub Actions kullanılıyor; piyasa verileri herkese açık API'lerden geliyor.</div></div><section className="card empty"><Ayarlar size={24}/><h2>Sistem Ayarları</h2><p>Tarama: 5 dk · Skor geçmişi: 15 dk · Kâr hedefi: +%1 · Zarar kes: -%0,8 · İşlem büyüklüğü: %10 · Kasa: 1.000 TL · Geçmiş: 30 gün.</p></section></>;
 }function Performance({paper}){
   const trades=paper?.trades||[];
   const wins=trades.filter(t=>t.netPnl>0).length;
