@@ -162,11 +162,11 @@ export default function App(){
       <header><button className="menu" onClick={()=>setOpen(true)}><Menu size={20}/></button><div><small>KİŞİSEL PİYASA SİSTEMİ</small><h1>{tab}</h1></div><div className="actions"><span className="market"><i className={connected?"live":""}/> {connected?"5 dakikalık veri aktif":"Veri bağlantısı yok"}</span><button className="start" disabled><Bot size={15}/> Botu Başlat</button></div></header>
       <section className="content">
         {error&&<div className="notice"><RefreshCw size={17}/><div><b>Piyasa verisi:</b> {error}</div></div>}
-        {tab==="Ana Sayfa"&&<Dashboard data={data} market={market} selectMarket={selectMarket}/>}
+        {tab==="Ana Sayfa"&&<Dashboard data={data} market={market} selectMarket={selectMarket} paperTrades={paperTrades}/>}
         {tab==="24 Saatlik Tarama"&&<Scanner analytics={analytics} markets={markets} history={history} historyError={historyError} selectMarket={selectMarket}/>}
         {tab==="Sinyaller"&&<Signals data={data} analytics={analytics}/>}
-        {tab==="İşlem Geçmişi"&&<Trades paper={data?.paper}/>}
-        {tab==="Performans"&&<Performance paper={data?.paper}/>}
+        {tab==="İşlem Geçmişi"&&<Trades paper={data?.paper} paperTrades={paperTrades} paperTradesError={paperTradesError}/>}
+        {tab==="Performans"&&<Performance paper={data?.paper} paperTrades={paperTrades}/>}
         {tab==="Skor Motoru"&&<ScoreEngine/>}
         {tab==="Risk"&&<Risk data={data}/>}
         {tab==="Ayarlar"&&<AyarlarPage/>}
