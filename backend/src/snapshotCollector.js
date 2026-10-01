@@ -492,7 +492,16 @@ async function main() {
   try {
     const flow = await fetchBinanceTradeFlow(markets);
     const bySymbol = new Map(flow.map(x => [x.symbol, x]));
-    for (const m of markets) m.binanceFlow = bySymbol.get(m.symbol) || null;
+    for (const m of markets) {
+      m.binanceFlow = bySymbol.get(m.symbol) || null;
+      if (m.binanceFlow) {
+        m.buyPressurePct = m.binanceFlow.buyPressurePct;
+        m.flowVolume = m.binanceFlow.flowVolume;
+        m.trades = m.binanceFlow.trades;
+        m.lastTradeAt = m.binanceFlow.lastTradeAt;
+      }
+      scoreMarket(m);
+    }
     console.log(`binance direct trade flow: ${flow.length} markets`);
   } catch (error) {
     console.error(`binance trade flow failed: ${error.message}`);
