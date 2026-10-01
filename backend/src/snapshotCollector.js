@@ -470,7 +470,7 @@ async function main() {
       const exchange = makeExchange(id);
       await exchange.loadMarkets();
       const symbols = bases.map(base => pickMarket(exchange.markets, base)).filter(Boolean).map(m => m.symbol);
-      const tickers = await fetchTickers(exchange, symbols);
+      const tickers = id === "binance" || id === "bybit" ? [] : await fetchTickers(exchange, symbols);
       if (id !== "binance" && id !== "bybit") {
         for (const ticker of tickers) {
           const market = exchange.markets[ticker.symbol];
