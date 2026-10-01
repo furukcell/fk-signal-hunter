@@ -428,7 +428,8 @@ async function runPaper(previous, markets, now) {
     const fees = entryFee + exitFee;
     const netPnl = gross - fees;
 
-    state.balance += p.quoteCost + netPnl;
+    // Entry fee was already reserved from cash at entry. At exit, return the position principal plus gross P&L minus only the exit fee.
+    state.balance += p.quoteCost + gross - exitFee;
     state.realizedPnl += netPnl;
     state.totalTrades += 1;
     if (netPnl > 0) state.wins += 1;
@@ -462,10 +463,13 @@ async function runPaper(previous, markets, now) {
     )
     .sort((a, b) => b.score - a.score);
 
-  // Sequential paper trading: every new opportunity can use 10% of
-  // currently available cash. No daily trade-count limit.
-  for (const m of candidates) {
-    if (state.positions.some(p => p.symbol === m.symbol)) continue;
+  // Sequential paper trading: one open position at a time, 10% of current cash per trade.
+  // There is no daily trade-count limit. Once a position closes, the next eligible opportunity can use the newly available cash.
+  if (state.positions.length === 0) {
+    for (const m of candidates) {
+      if (state.positions.some(p => p.symbol === m.symbol)) continue;
+      if (m.buyPressurePct != null && m.buyPressurePct < 50) continue;
+      if (m.weightedImbalancePct != null && m.weightedImbalancePct < -10) continue;
 
     const venues = Object.entries(m.exchangeData || {})
       .map(([exchange, data]) => ({ exchange, ...data }))
@@ -491,20 +495,22 @@ async function runPaper(previous, markets, now) {
     if (totalReserved > state.balance) continue;
 
     state.balance -= totalReserved;
-    state.positions.push({
-      id: `paper-${m.symbol}-${now}`,
-      symbol: m.symbol,
-      exchange: entryVenue.exchange,
-      entryPrice: entry,
-      quantity,
-      quoteCost: actualCost,
-      feeRate,
-      entryFee,
-      score: m.score,
-      signal: m.signal,
-      reasons: m.reasons,
-      openedAt: now
-    });
+      state.positions.push({
+        id: `paper-${m.symbol}-${now}`,
+        symbol: m.symbol,
+        exchange: entryVenue.exchange,
+        entryPrice: entry,
+        quantity,
+        quoteCost: actualCost,
+        feeRate,
+        entryFee,
+        score: m.score,
+        signal: m.signal,
+        reasons: m.reasons,
+        openedAt: now
+      });
+      break;
+    }
   }
 
   const openValue = state.positions.reduce((sum, p) => {
@@ -528,7 +534,9 @@ async function runPaper(previous, markets, now) {
   state.positionSizePct = 10;
   state.takeProfitPct = 1;
   state.stopLossPct = -0.8;
-  state.maxConcurrentPositions = null;
+  state.feeRate = 0.001;
+  state.strategy = "SKOR_82_PLUS_SEQUENTIAL";
+  state.maxConcurrentPositions = 1;
   state.mode = "PAPER_ONLY";
   state.lastRunAt = now;
 
@@ -537,7 +545,8 @@ async function runPaper(previous, markets, now) {
     equity: state.equity,
     cash: state.balance,
     openValue,
-    realizedPnl: state.realizedPnl
+    realizedPnl: state.realizedPnl,
+    openPositions: state.positions.length
   });
   state.equityHistory = state.equityHistory.slice(-2000);
 
