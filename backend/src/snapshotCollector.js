@@ -540,9 +540,6 @@ async function main() {
   await firebase.write("public", "analyticsState", {
     schemaVersion: 1, generatedAt: new Date(now).toISOString(), payload: JSON.stringify(analytics.state)
   }, true);
-  await firebase.write("public", "analytics24h", {
-    schemaVersion: 1, generatedAt: new Date(now).toISOString(), payload: JSON.stringify(analytics.public)
-  }, true);
   await firebase.writePublicSnapshot(payload);
   await firebase.writeHistoricalSnapshot(now, payload);
 
