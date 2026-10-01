@@ -1,6 +1,7 @@
 import ccxt from "ccxt";
 import { FirebaseStore } from "./firebaseStore.js";
 import { FEE_PROFILES } from "./paperEngine.js";
+import { buildAnalytics } from "./signalAnalytics.js";
 
 const MAX_COINS = Number(process.env.SNAPSHOT_MAX_COINS || 100);
 const DEPTH_COINS = Number(process.env.SNAPSHOT_DEPTH_COINS || 20);
@@ -513,6 +514,8 @@ async function main() {
   const now = Date.now();
   const previous = await firebase.read("public", "paperState");
   const paper = await runPaper(previous?.payload ? JSON.parse(previous.payload) : null, markets, now);
+  const previousAnalytics = await firebase.read("public", "analyticsState");
+  const analytics = buildAnalytics(previousAnalytics?.payload || null, markets, now);
 
   const rankedMarkets = markets.slice().sort((a, b) => b.score - a.score);
   const payload = {
@@ -533,6 +536,12 @@ async function main() {
 
   await firebase.write("public", "paperState", {
     schemaVersion: 1, generatedAt: new Date(now).toISOString(), payload: JSON.stringify(paper)
+  }, true);
+  await firebase.write("public", "analyticsState", {
+    schemaVersion: 1, generatedAt: new Date(now).toISOString(), payload: JSON.stringify(analytics.state)
+  }, true);
+  await firebase.write("public", "analytics24h", {
+    schemaVersion: 1, generatedAt: new Date(now).toISOString(), payload: JSON.stringify(analytics.public)
   }, true);
   await firebase.writePublicSnapshot(payload);
   await firebase.writeHistoricalSnapshot(now, payload);
