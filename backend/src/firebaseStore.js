@@ -99,6 +99,30 @@ class FirebaseStore {
     }, false);
   }
 
+  async deleteHistoricalSnapshotsOlderThan(cutoffTimestamp, maxDeletes = 500) {
+    if (!this.enabled || !this.db) return 0;
+
+    try {
+      const cutoff = new Date(cutoffTimestamp).toISOString();
+      const snapshot = await this.db
+        .collection("historicalSnapshots")
+        .where("generatedAt", "<", cutoff)
+        .limit(maxDeletes)
+        .get();
+
+      if (snapshot.empty) return 0;
+
+      const batch = this.db.batch();
+      snapshot.docs.forEach(doc => batch.delete(doc.ref));
+      await batch.commit();
+      return snapshot.size;
+    } catch (error) {
+      this.writeErrors += 1;
+      console.error("Historical snapshot cleanup failed:", error.message);
+      return 0;
+    }
+  }
+
   async recordSignalOutcome(id, outcome) {
     return this.write("signals", id, {
       outcome,
