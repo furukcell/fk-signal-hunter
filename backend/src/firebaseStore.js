@@ -87,6 +87,28 @@ class FirebaseStore {
     return this.write("dailyStats", date, summary, true);
   }
 
+  async smokeTest() {
+    if (!this.enabled || !this.db) {
+      throw new Error("Firebase is not enabled");
+    }
+
+    const id = `smoke-${Date.now()}`;
+    const ref = this.db.collection("_system").doc(id);
+
+    await ref.set({
+      type: "firebase_smoke_test",
+      createdAt: FieldValue.serverTimestamp()
+    });
+
+    const snapshot = await ref.get();
+    if (!snapshot.exists) {
+      throw new Error("Firebase smoke test read failed");
+    }
+
+    await ref.delete();
+    return true;
+  }
+
   snapshot() {
     return {
       enabled: this.enabled,
