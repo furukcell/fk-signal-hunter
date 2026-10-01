@@ -30,6 +30,7 @@ jobs:
       - run: node --check src/historicalCollector.js
       - run: node --check src/historicalLoader.js
       - run: node --check src/walkForwardEngine.js
+      - run: node --check src/snapshotCollector.js
       - run: npm test
       - name: Verify Firebase Admin credentials
         run: |
