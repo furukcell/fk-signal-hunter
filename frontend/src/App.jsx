@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useState} from "react";
-import {Activity,BarChart3,Bot,Gauge,LayoutDashboard,ListFilter,Menu,RefreshCw,Settings,ShieldCheck,Signal,Target,TrendingUp,Wallet,X} from "lucide-react";
+import {Activity,BarChart3,Bot,Gauge,LayoutDashboard,ListFilter,Menu,RefreshCw,Ayarlar,ShieldCheck,Signal,Target,TrendingUp,Wallet,X} from "lucide-react";
 
 const nav=[
   ["Ana Sayfa",LayoutDashboard],
@@ -9,12 +9,12 @@ const nav=[
   ["Performans",BarChart3],
   ["Skor Motoru",Gauge],
   ["Risk",ShieldCheck],
-  ["Ayarlar",Settings]
+  ["Ayarlar",Ayarlar]
 ];
 
 const SNAPSHOT_URL="https://firestore.googleapis.com/v1/projects/fk-signal-hunter/databases/(default)/documents/public/latest";
 
-async function fetchSnapshot(){
+async function fetchTarama(){
   const res=await fetch(SNAPSHOT_URL,{cache:"no-store"});
   if(!res.ok) throw new Error("Veri alınamadı");
   const doc=await res.json();
@@ -47,7 +47,7 @@ export default function App(){
     let alive=true;
     const load=async()=>{
       try{
-        const d=await fetchSnapshot();
+        const d=await fetchTarama();
         const preferred=market?.symbol;
         const next=d.markets?.find(x=>x.symbol===preferred)??d.markets?.[0]??null;
         if(alive){setData(d);setMarket(next);setError(null);}
@@ -81,7 +81,7 @@ export default function App(){
         {tab==="Performans"&&<Performance paper={data?.paper}/>}
         {tab==="Skor Motoru"&&<ScoreEngine/>}
         {tab==="Risk"&&<Risk data={data}/>}
-        {tab==="Ayarlar"&&<SettingsPage/>}
+        {tab==="Ayarlar"&&<AyarlarPage/>}
       </section>
     </main>
   </div>;
@@ -218,7 +218,7 @@ function ScoreEngine(){
     ["Spread","+4 / -5","İşlem maliyeti / likidite kalitesi"],
     ["Alıcı baskısı","±10","Binance son işlem örneklemindeki alıcı baskısı"]
   ];
-  return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “WATCH fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>MEVCUT FORMÜL</small><h2>Skor Motoru</h2></div><span className="tag">PROTOTİP</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu skor tek başına kullanılmayacak. 5 dakikalık momentum, hacim anomalisi, gerçek işlem akışı, kayma, volatilite, borsalar arası teyit ve risk kuralları ayrı bir giriş motorunda test edilecek.</p></section></>;
+  return <><div className="notice"><Gauge size={17}/><div><b>Bu motor şu an prototip.</b> 82+ sadece “FIRSAT fırsatı” üretir. İstatistikler birikmeden bu skorun kârlı olduğu varsayılmıyor.</div></div><section className="card tableCard"><div className="head"><div><small>MEVCUT FORMÜL</small><h2>Skor Motoru</h2></div><span className="tag">PROTOTİP</span></div><div className="formulaGrid">{rows.map(r=><div key={r[0]}><b>{r[0]}</b><strong>{r[1]}</strong><span>{r[2]}</span></div>)}</div></section><section className="card empty"><Target size={24}/><h2>Gelecek “AL” motoru</h2><p>Gerçek alım kararı için bu skor tek başına kullanılmayacak. 5 dakikalık momentum, hacim anomalisi, gerçek işlem akışı, kayma, volatilite, borsalar arası teyit ve risk kuralları ayrı bir giriş motorunda test edilecek.</p></section></>;
 }
 
 function Risk({data}){
@@ -235,8 +235,8 @@ function Risk({data}){
   </>;
 }
 
-function SettingsPage(){
-  return <><div className="notice"><Settings size={17}/><div><b>Ücretsiz mod.</b> Harici zamanlayıcı + GitHub Actions kullanılıyor; piyasa verileri herkese açık API'lerden geliyor.</div></div><section className="card empty"><Settings size={24}/><h2>Sistem Ayarları</h2><p>Tarama: 5 dk · Skor geçmişi: 15 dk · Kâr hedefi: +%1 · Zarar kes: -%0,8 · İşlem büyüklüğü: %10 · Kasa: 1.000 TL · Geçmiş: 30 gün.</p></section></>;
+function AyarlarPage(){
+  return <><div className="notice"><Ayarlar size={17}/><div><b>Ücretsiz mod.</b> Harici zamanlayıcı + GitHub Actions kullanılıyor; piyasa verileri herkese açık API'lerden geliyor.</div></div><section className="card empty"><Ayarlar size={24}/><h2>Sistem Ayarları</h2><p>Tarama: 5 dk · Skor geçmişi: 15 dk · Kâr hedefi: +%1 · Zarar kes: -%0,8 · İşlem büyüklüğü: %10 · Kasa: 1.000 TL · Geçmiş: 30 gün.</p></section></>;
 }function Performance({paper}){
   const trades=paper?.trades||[];
   const wins=trades.filter(t=>t.netPnl>0).length;
