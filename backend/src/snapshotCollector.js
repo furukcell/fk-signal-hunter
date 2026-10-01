@@ -238,6 +238,13 @@ function scoreMarket(m) {
     else if (m.spreadPct >= 0.20) score -= 5;
   }
 
+  if (m.buyPressurePct != null) {
+    if (m.buyPressurePct >= 60) { score += 10; reasons.push("Binance buy pressure"); }
+    else if (m.buyPressurePct >= 55) score += 5;
+    else if (m.buyPressurePct <= 40) { score -= 10; reasons.push("Binance sell pressure"); }
+    else if (m.buyPressurePct <= 45) score -= 5;
+  }
+
   m.score = clamp(Math.round(score), 0, 100);
   m.signal = m.score >= 82 ? "WATCH" : m.score >= 70 ? "MONITOR" : "WAIT";
   m.reasons = reasons.slice(0, 5);
@@ -464,9 +471,11 @@ async function main() {
       await exchange.loadMarkets();
       const symbols = bases.map(base => pickMarket(exchange.markets, base)).filter(Boolean).map(m => m.symbol);
       const tickers = await fetchTickers(exchange, symbols);
-      for (const ticker of tickers) {
-        const market = exchange.markets[ticker.symbol];
-        if (market?.quote === "USDT") rows.push(normalizeTicker(id, ticker, market, Date.now()));
+      if (id !== "binance" && id !== "bybit") {
+        for (const ticker of tickers) {
+          const market = exchange.markets[ticker.symbol];
+          if (market?.quote === "USDT") rows.push(normalizeTicker(id, ticker, market, Date.now()));
+        }
       }
       exchanges.push(exchange);
       console.log(`${id}: ${tickers.length} tickers`);
